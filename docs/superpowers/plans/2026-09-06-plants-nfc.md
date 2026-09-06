@@ -12,7 +12,7 @@
 
 ---
 
-## 与 Spec 的一处偏离（需确认）
+## 与 Spec 的一处偏离（已确认）
 
 Spec 第 4 节写的是「单个 HTML 文件」。本计划改为 `index.html` + `src/` 下三个 js 文件。
 
@@ -32,6 +32,7 @@ Spec 第 4 节写的是「单个 HTML 文件」。本计划改为 `index.html` +
 | `test/github.test.js` | `github.js` 的测试，用假 fetch |
 | `config.json` | 植物名单 + 肥料名单（数据） |
 | `log.json` | 施肥流水（数据） |
+| `photos/<代号>.jpg` | 每盆一张压缩过的照片，单盆页面顶部显示 |
 | `.nojekyll` | 告诉 GitHub Pages 不要跑 Jekyll，否则 `_` 开头的路径会被吃掉 |
 
 ---
@@ -952,10 +953,19 @@ git add -A && git commit -m "Add page shell, styles, and token setup flow"
 
 按 spec 第 5.1 节：
 
-- 从 `parsePlantId(location.search)` 拿植物代号
+- 从 `parsePlantId(location.search)` 拿植物代号（代号直接用中文，`?p=龟背竹`，URLSearchParams 自动解码）
 - 并行 `readJson('config.json')` 和 `readJson('log.json', [])` 取初始数据。**不要在 app 层记 sha** —— `store.update()` 自己管
 - 代号在 `config.plants` 里查不到 → 渲染「这盆还没名字，取一个？」的取名界面（Task 9 处理）
-- 顶部：植物名 + 「上次施肥 8/30 · 7 天前」
+- **最顶部：照片** `<img src="photos/{代号}.jpg">`
+
+  ```js
+  // No photo for this plant: remove the block entirely rather than showing
+  // a broken-image icon or leaving a gap.
+  img.onerror = () => img.closest('.photo').remove();
+  ```
+
+  照片路径**用相对路径**（`photos/...`），不要用 `/photos/...` —— 站点部署在 `/plants/` 子路径下，绝对路径会 404。
+- 植物名 + 「上次施肥 8/30 · 7 天前」
 - 有上次记录时显示大按钮「今天也施 {上次的肥}」；从没记录过则隐藏这个按钮
 - 下方 `visibleFertilizers(config, 上次的肥)` 渲染成按钮网格
 - 底部历史列表，`entriesFor` 的结果
@@ -965,13 +975,13 @@ git add -A && git commit -m "Add page shell, styles, and token setup flow"
 点任意肥料按钮：
 
 1. 按钮立刻进入「记录中…」的禁用态，防止连点记两笔
-2. 调 `store.update('log.json', [], (log) => addEntry(log, id, todayLocal(), fert), message)`
+2. 调 `store.update('log.json', [], (log) => addEntry(log, id, todayLocal(), fert), \`Log ${植物名} / ${肥料名}\`)`
 
    传函数而不是算好的数组，是为了让冲突重试能在最新数据上重放这次追加（见 Task 6 的接口说明）。
+
+   commit message 定为 `Log 龟背竹 / 花多多#01` —— 英文动词开头守全局规则第 6 条，植物名和肥料名保留中文原样。
 3. 成功 → `update` 的返回值就是新的 log，用它替换内存里的副本，重新渲染，顶部给一条「已记录」提示
 4. **失败 → 明确显示「没存上：{错误}」并把按钮恢复可点**，内存里的 log 保持原样。绝不能假装成功
-
-> ⚠️ commit message 的写法待 Annie 确认，见文末「待确认」一节。
 
 - [ ] **Step 3: 本地验证**
 
@@ -1078,7 +1088,66 @@ git add -A && git commit -m "Add home overview sorted by staleness"
 
 ---
 
-## Task 11: 上线与实机验证
+## Task 11: 植物名单与照片入库
+
+Annie 会提供一份植物名单文件和对应照片。**这个任务在拿到文件之前做不了，拿到后再动手。**
+
+**Files:**
+- Modify: `config.json`
+- Create: `photos/<代号>.jpg`
+
+- [ ] **Step 1: 从 Annie 给的文件生成 `config.json` 的 `plants` 部分**
+
+代号直接用中文植物名，代号和显示名一致：
+
+```json
+{
+  "plants": { "龟背竹": "龟背竹", "琴叶榕": "琴叶榕" },
+  "fertilizers": [ ... ]
+}
+```
+
+同名重复时（比如两盆龟背竹）加后缀区分：`龟背竹1` / `龟背竹2`，显示名可以写「龟背竹（阳台）」。
+
+- [ ] **Step 2: 压缩照片**
+
+手机原图一张 3–5 MB，15 盆就是 70 MB 进 public 仓库，手机用流量打开会很慢。用 macOS 自带的 `sips`，不用装东西：
+
+```bash
+cd ~/Documents/plants-nfc && mkdir -p photos
+# --resampleWidth only shrinks; it never upscales a small photo.
+for f in <Annie 给的照片目录>/*.{jpg,jpeg,JPG,HEIC}; do
+  [ -e "$f" ] || continue
+  sips -s format jpeg -s formatOptions 70 --resampleWidth 800 \
+       "$f" --out "photos/$(basename "${f%.*}").jpg"
+done
+du -sh photos && ls -la photos | head
+```
+
+`sips` 能直接读 iPhone 的 HEIC，输出 jpeg。**验收标准：`photos/` 总体积 < 3 MB。**超了就把 `formatOptions` 从 70 降到 55 再跑一遍。
+
+- [ ] **Step 3: 核对文件名与代号严格一致**
+
+```bash
+cd ~/Documents/plants-nfc && node -e '
+const cfg = JSON.parse(require("fs").readFileSync("config.json"));
+const have = new Set(require("fs").readdirSync("photos").map(f => f.replace(/\.jpg$/, "")));
+for (const id of Object.keys(cfg.plants)) if (!have.has(id)) console.log("缺照片:", id);
+for (const f of have) if (!cfg.plants[f]) console.log("多余照片:", f);
+'
+```
+
+⚠️ macOS 的文件名对中文用 NFD 形式（分解式）存储，而 JSON 里是 NFC 形式（组合式），**看起来一模一样但字节不同**，页面会 404。带声调或罕见字的名字尤其容易中招。上面这段脚本会把它们当成「缺照片 + 多余照片」同时报出来——出现这种成对报错就是这个问题，用 `id.normalize('NFC')` 统一后重命名文件。
+
+- [ ] **Step 4: 提交**
+
+```bash
+git add -A && git commit -m "Add plant roster and compressed photos"
+```
+
+---
+
+## Task 12: 上线与实机验证
 
 **Files:**
 - Create: `README.md`
@@ -1142,13 +1211,16 @@ gh api -X POST repos/pyyannie/plants/pages -f 'source[branch]=main' -f 'source[p
 
 ---
 
-## 待确认（开工前问 Annie）
+## 已确认的决定
 
-1. **与 spec 的偏离**：单文件改成 `index.html` + `src/` 下三个 js（见文首）。
-2. **应用自动生成的 commit message 用什么语言。** 全局规则第 6 条说写进 git/GitHub 的文字用英文，但手机记一笔时程序会自动生成 message，内容天然带中文植物名和肥料名。三个选项：
-   - `Log guibeizhu / 花多多#01` —— 英文动词 + 原始数据，兼顾规则和可读性
-   - `龟背竹 花多多#01` —— 纯中文，需要 Annie 明确豁免（数据提交不算代码提交）
-   - `Log fertilizing` —— 纯英文，但翻历史时看不出是哪盆
+1. **与 spec 的偏离**：单文件改成 `index.html` + `src/` 下三个 js。✅ Annie 同意（2026-09-06）
+2. **植物代号直接用中文**，`?p=龟背竹`，不另起拼音代号。
+3. **commit message** 定为 `Log 龟背竹 / 花多多#01` —— 英文动词开头守规则第 6 条，数据部分保留中文。
+4. **照片显示在单盆页面顶部**，缺照片时整块不渲染。照片从 Mac 推进仓库，不做应用内上传。
+
+## 还缺的输入
+
+- **Annie 的植物名单文件 + 对应照片** —— Task 11 的前置条件。Task 1–10 不依赖它，可以先做。
 
 ---
 
