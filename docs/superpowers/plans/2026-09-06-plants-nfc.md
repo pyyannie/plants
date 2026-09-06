@@ -56,10 +56,12 @@ Spec 第 4 节写的是「单个 HTML 文件」。本计划改为 `index.html` +
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test"
   }
 }
 ```
+
+⚠️ 必须是 `node --test`，**不能**写 `node --test test/`。Node 22 之后位置参数按通配符解释，`test/` 会匹配到目录本身并当模块加载，实测报 `Cannot find module '.../test'` 且 `pass 0 fail 1`。这个错误信息跟 Step 3 期望看到的很像，容易误判成通道是通的。
 
 - [ ] **Step 2: 写一个必定失败的冒烟测试**
 
@@ -296,6 +298,15 @@ test('renameFertilizer with alsoHistory=true rewrites the log too', () => {
   assert.equal(countFertilizerUses(log, '花多多#01'), 0);
   assert.equal(countFertilizerUses(log, '花多多通用型'), 1);
 });
+
+test('renaming onto a hidden name explains that it was deleted, not that it exists', () => {
+  // 奥绿A2 is hidden, so the user cannot see it in the grid. A bare
+  // "already exists" message would look like the app is lying to them.
+  assert.throws(
+    () => renameFertilizer(CONFIG, LOG, '花多多#01', '奥绿A2', false),
+    /以前删掉过/
+  );
+});
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -320,7 +331,8 @@ export function visibleFertilizers(config, excludeName = null) {
 }
 
 export function addFertilizer(config, rawName) {
-  const name = rawName.trim();
+  // rawName may be null: prompt() returns null when the user taps Cancel.
+  const name = (rawName ?? '').trim();
   if (!name) throw new Error('名字不能为空');
 
   const existing = config.fertilizers.find((f) => f.name === name);
@@ -350,11 +362,19 @@ export function countFertilizerUses(log, name) {
 // alsoHistory=true rewrites past entries (the name was a typo).
 // alsoHistory=false keeps them (the product genuinely changed).
 export function renameFertilizer(config, log, oldName, rawNewName, alsoHistory) {
-  const newName = rawNewName.trim();
+  const newName = (rawNewName ?? '').trim();
   if (!newName) throw new Error('名字不能为空');
   if (newName === oldName) return { config, log };
-  if (config.fertilizers.some((f) => f.name === newName)) {
-    throw new Error(`「${newName}」已经有了`);
+
+  const clash = config.fertilizers.find((f) => f.name === newName);
+  if (clash) {
+    // Distinguish visible from hidden: a hidden clash is invisible to the user,
+    // so "already exists" would look like a lie.
+    throw new Error(
+      clash.hidden
+        ? `「${newName}」以前删掉过，先用＋把它加回来`
+        : `「${newName}」已经有了`
+    );
   }
 
   const nextConfig = {
@@ -377,7 +397,7 @@ export function renameFertilizer(config, log, oldName, rawNewName, alsoHistory) 
 cd ~/Documents/plants-nfc && npm test
 ```
 
-Expected: PASS，15 passing
+Expected: PASS，16 passing
 
 - [ ] **Step 5: 提交**
 
@@ -432,6 +452,17 @@ test('plantOverview sorts by staleness, never-fertilized plants first', () => {
   assert.equal(rows[1].days, 7);
   assert.equal(rows[2].days, 4);
 });
+
+test('plantOverview keeps every plant when several have never been fertilized', () => {
+  // A fresh install has config.plants = {} and every newly registered plant
+  // has days === null. Guards against the NaN comparator dropping or shuffling rows.
+  let config = CONFIG;
+  for (const id of ['a', 'b', 'c', 'd']) config = addPlant(config, id, `植物${id}`);
+  const rows = plantOverview(config, LOG, '2026-09-06');
+  assert.equal(rows.length, 6);
+  assert.deepEqual(rows.slice(-2).map((r) => r.id), ['guibeizhu', 'qinyerong']);
+  assert.ok(rows.slice(0, 4).every((r) => r.days === null));
+});
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
@@ -453,7 +484,7 @@ export function parsePlantId(search) {
 }
 
 export function addPlant(config, id, rawName) {
-  const name = rawName.trim();
+  const name = (rawName ?? '').trim();
   if (!name) throw new Error('名字不能为空');
   if (config.plants[id]) throw new Error(`这枚芯片已经登记为「${config.plants[id]}」`);
   return { ...config, plants: { ...config.plants, [id]: name } };
@@ -477,7 +508,14 @@ export function plantOverview(config, log, todayIso) {
         days: last ? daysSince(last.date, todayIso) : null,
       };
     })
-    .sort((a, b) => (b.days ?? Infinity) - (a.days ?? Infinity));
+    .sort((a, b) => {
+      // Both null would give Infinity - Infinity = NaN, and a comparator that
+      // returns NaN makes sort order implementation-defined. On a fresh install
+      // every plant has days === null, so this is the common case, not an edge one.
+      const av = a.days ?? Infinity;
+      const bv = b.days ?? Infinity;
+      return av === bv ? 0 : bv - av;
+    });
 }
 ```
 
@@ -487,7 +525,7 @@ export function plantOverview(config, log, todayIso) {
 cd ~/Documents/plants-nfc && npm test
 ```
 
-Expected: PASS，20 passing
+Expected: PASS，22 passing
 
 - [ ] **Step 5: 提交**
 
@@ -564,7 +602,7 @@ export function decodeBase64Utf8(b64) {
 cd ~/Documents/plants-nfc && npm test
 ```
 
-Expected: PASS，23 passing
+Expected: PASS，25 passing
 
 - [ ] **Step 5: 提交**
 
@@ -576,7 +614,13 @@ git add -A && git commit -m "Add UTF-8 safe base64 helpers for the Contents API"
 
 ## Task 6: GitHub 读写客户端（github.js）
 
-spec 第 8 节的两条要求落在这里：读要绕开缓存，写要处理 sha 冲突并重试一次。
+spec 第 8 节的两条要求落在这里：读要绕开缓存，写要处理 sha 冲突。
+
+### 接口决定：`update(path, fallback, updateFn, message)`，不是 `writeJson(path, data, ...)`
+
+冲突重试**只补 sha 是不够的**。假如另一台设备刚记了一笔，本机手上的 `data` 是基于旧快照算出来的；只换新 sha 再提交，HTTP 会成功、界面会显示「已记录」，但对方那笔被整份覆盖——正是 spec 第 8 节要防的静默丢失，只是更隐蔽。
+
+所以由客户端自己完成「读 → 改 → 写」整个循环，调用方传的是**怎么改**（一个函数），不是**改成什么**（一份算好的数据）。冲突时重读最新数据，**把改动重新施加一遍**再提交。附带好处：调用方完全不用管 sha。
 
 **Files:**
 - Create: `src/github.js`
@@ -590,7 +634,7 @@ spec 第 8 节的两条要求落在这里：读要绕开缓存，写要处理 sh
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GitHubStore } from '../src/github.js';
-import { encodeBase64Utf8 } from '../src/logic.js';
+import { encodeBase64Utf8, decodeBase64Utf8 } from '../src/logic.js';
 
 function makeStore(fetchImpl) {
   return new GitHubStore({
@@ -598,71 +642,108 @@ function makeStore(fetchImpl) {
   });
 }
 
+const ok = (body) => ({ ok: true, status: 200, json: async () => body });
+const err = (status, message) => ({ ok: false, status, json: async () => ({ message }) });
+const putBody = (opts) => JSON.parse(opts.body);
+const putData = (opts) => JSON.parse(decodeBase64Utf8(putBody(opts).content));
+
 test('readJson parses content and returns the sha', async () => {
   const calls = [];
   const store = makeStore(async (url, opts) => {
     calls.push({ url, opts });
-    return {
-      ok: true, status: 200,
-      json: async () => ({ content: encodeBase64Utf8('{"a":"龟背竹"}'), sha: 'abc' }),
-    };
+    return ok({ content: encodeBase64Utf8('{"a":"龟背竹"}'), sha: 'abc' });
   });
 
   const { data, sha } = await store.readJson('config.json');
   assert.deepEqual(data, { a: '龟背竹' });
   assert.equal(sha, 'abc');
   assert.match(calls[0].url, /repos\/pyyannie\/plants\/contents\/config\.json/);
-  assert.equal(calls[0].opts.cache, 'no-store', 'must bypass the CDN cache');
   assert.equal(calls[0].opts.headers.Authorization, 'Bearer t');
 });
 
+test('readJson defeats caching two ways, since Safari honours them inconsistently', async () => {
+  let seen;
+  const store = makeStore(async (url, opts) => {
+    seen = opts;
+    return ok({ content: encodeBase64Utf8('{}'), sha: 'abc' });
+  });
+  await store.readJson('config.json');
+  // api.github.com returns `Cache-Control: private, max-age=60` on authenticated
+  // requests, so a just-written entry can be invisible for a minute without this.
+  assert.equal(seen.headers['Cache-Control'], 'no-cache');
+  assert.equal(seen.cache, 'no-store');
+});
+
 test('readJson returns a null sha when the file does not exist yet', async () => {
-  const store = makeStore(async () => ({ ok: false, status: 404, json: async () => ({}) }));
+  const store = makeStore(async () => err(404, 'Not Found'));
   const { data, sha } = await store.readJson('log.json', []);
   assert.deepEqual(data, []);
   assert.equal(sha, null);
 });
 
-test('writeJson sends base64 content with the sha', async () => {
+test('update reads, applies the change, and PUTs with the sha it read', async () => {
   let put;
   const store = makeStore(async (url, opts) => {
-    if (opts.method === 'PUT') { put = JSON.parse(opts.body); return { ok: true, status: 200, json: async () => ({}) }; }
-    throw new Error('unexpected GET');
+    if (opts?.method === 'PUT') { put = opts; return ok({}); }
+    return ok({ content: encodeBase64Utf8('[]'), sha: 'abc' });
   });
 
-  await store.writeJson('log.json', [{ fert: '花多多#01' }], 'abc', 'log fertilizing');
-  assert.equal(put.sha, 'abc');
-  assert.equal(put.message, 'log fertilizing');
-  assert.match(put.content, /^[A-Za-z0-9+/=]+$/);
+  const result = await store.update('log.json', [], (log) => [...log, { fert: '花多多#01' }], 'log it');
+  assert.equal(putBody(put).sha, 'abc');
+  assert.equal(putBody(put).message, 'log it');
+  assert.deepEqual(putData(put), [{ fert: '花多多#01' }]);
+  assert.deepEqual(result, [{ fert: '花多多#01' }], 'returns the new data for in-memory state');
 });
 
-test('writeJson retries once with a fresh sha after a 409 conflict', async () => {
-  const seen = [];
+test('update re-applies the change to fresh data after a conflict, keeping both entries', async () => {
+  // The core regression guard: another device committed 琴叶榕 between our read
+  // and our write. Retrying with only a fresh sha would silently erase it.
+  let puts = 0;
   const store = makeStore(async (url, opts) => {
-    if (opts.method === 'PUT') {
-      seen.push(JSON.parse(opts.body).sha);
-      return seen.length === 1
-        ? { ok: false, status: 409, json: async () => ({ message: 'conflict' }) }
-        : { ok: true, status: 200, json: async () => ({}) };
+    if (opts?.method === 'PUT') {
+      puts += 1;
+      return puts === 1 ? err(409, 'conflict') : ok({});
     }
-    return { ok: true, status: 200, json: async () => ({ content: encodeBase64Utf8('[]'), sha: 'fresh' }) };
+    const content = puts === 0
+      ? JSON.stringify([{ fert: '花多多#02' }])
+      : JSON.stringify([{ fert: '花多多#02' }, { fert: '琴叶榕的肥' }]);
+    return ok({ content: encodeBase64Utf8(content), sha: puts === 0 ? 'stale' : 'fresh' });
   });
 
-  await store.writeJson('log.json', [], 'stale', 'msg');
-  assert.deepEqual(seen, ['stale', 'fresh'], 'second attempt must use the re-read sha');
+  let lastPut;
+  const spy = store.fetchImpl;
+  store.fetchImpl = async (url, opts) => {
+    const res = await spy(url, opts);
+    if (opts?.method === 'PUT') lastPut = opts;
+    return res;
+  };
+
+  await store.update('log.json', [], (log) => [...log, { fert: '我的肥' }], 'msg');
+  assert.equal(putBody(lastPut).sha, 'fresh');
+  assert.deepEqual(putData(lastPut).map((e) => e.fert), ['花多多#02', '琴叶榕的肥', '我的肥']);
 });
 
-test('writeJson throws when the retry also fails, so the UI can report it', async () => {
+test('update throws when the retry also fails, so the UI can report it', async () => {
   const store = makeStore(async (url, opts) => {
-    if (opts.method === 'PUT') return { ok: false, status: 409, json: async () => ({ message: 'still conflicting' }) };
-    return { ok: true, status: 200, json: async () => ({ content: encodeBase64Utf8('[]'), sha: 'fresh' }) };
+    if (opts?.method === 'PUT') return err(409, 'still conflicting');
+    return ok({ content: encodeBase64Utf8('[]'), sha: 'fresh' });
   });
-  await assert.rejects(() => store.writeJson('log.json', [], 'stale', 'msg'), /still conflicting/);
+  await assert.rejects(() => store.update('log.json', [], (l) => l, 'msg'), /still conflicting/);
 });
 
 test('a 401 surfaces as a token problem, not a generic failure', async () => {
-  const store = makeStore(async () => ({ ok: false, status: 401, json: async () => ({ message: 'Bad credentials' }) }));
+  const store = makeStore(async () => err(401, 'Bad credentials'));
   await assert.rejects(() => store.readJson('config.json'), /token/);
+});
+
+test('a 403 rate limit says "slow down", not "your token is broken"', async () => {
+  // GitHub returns 403 for secondary rate limits too. Telling a non-programmer
+  // their token is invalid would send them off regenerating it for nothing.
+  const limited = makeStore(async () => err(403, 'You have exceeded a secondary rate limit'));
+  await assert.rejects(() => limited.readJson('config.json'), /等一分钟/);
+
+  const forbidden = makeStore(async () => err(403, 'Resource not accessible by personal access token'));
+  await assert.rejects(() => forbidden.readJson('config.json'), /token/);
 });
 ```
 
@@ -683,7 +764,12 @@ const API = 'https://api.github.com';
 
 export class GitHubStore {
   // fetchImpl is injectable so the tests can run without a network.
-  constructor({ owner, repo, token, branch = 'main', fetchImpl = globalThis.fetch }) {
+  // It must stay wrapped in an arrow, NOT `globalThis.fetch` directly: assigning
+  // fetch onto `this` and calling `this.fetchImpl(...)` rebinds its receiver, and
+  // the browser's fetch has a brand check that throws "Illegal invocation".
+  // Node's fetch has no such check, so a direct reference passes every test here
+  // and then fails on the phone.
+  constructor({ owner, repo, token, branch = 'main', fetchImpl = (...a) => globalThis.fetch(...a) }) {
     Object.assign(this, { owner, repo, token, branch, fetchImpl });
   }
 
@@ -696,15 +782,26 @@ export class GitHubStore {
       Authorization: `Bearer ${this.token}`,
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
+      // api.github.com sends `Cache-Control: private, max-age=60` on authenticated
+      // requests. Without this, iOS Safari can serve a stale copy for a minute and
+      // a just-logged entry appears to have vanished.
+      'Cache-Control': 'no-cache',
     };
   }
 
   async #fail(res) {
     const body = await res.json().catch(() => ({}));
-    if (res.status === 401 || res.status === 403) {
-      throw new Error(`token 无效或权限不够（${res.status}）：${body.message ?? ''}`);
+    const message = body.message ?? '';
+    // GitHub also returns 403 for secondary rate limits, which the rename flow
+    // (two writes back to back) can trigger. Telling Annie her token is invalid
+    // would send her off regenerating it for no reason.
+    if (res.status === 403 && /rate limit/i.test(message)) {
+      throw new Error('操作太快了，等一分钟再试');
     }
-    throw new Error(`GitHub 返回 ${res.status}：${body.message ?? '未知错误'}`);
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(`token 无效或权限不够（${res.status}）：${message}`);
+    }
+    throw new Error(`GitHub 返回 ${res.status}：${message || '未知错误'}`);
   }
 
   // Returns { data, sha }. sha is null when the file does not exist yet, which
@@ -712,7 +809,7 @@ export class GitHubStore {
   async readJson(path, fallback = null) {
     const res = await this.fetchImpl(`${this.#url(path)}?ref=${this.branch}`, {
       headers: this.#headers(),
-      cache: 'no-store', // Pages/CDN would otherwise serve a stale copy
+      cache: 'no-store',
     });
     if (res.status === 404) return { data: fallback, sha: null };
     if (!res.ok) await this.#fail(res);
@@ -734,16 +831,27 @@ export class GitHubStore {
     });
   }
 
-  // A 409/422 means someone else committed since we read the sha. Re-read and
-  // retry once. Without this the write fails silently and a fertilizing gets lost.
-  async writeJson(path, data, sha, message) {
-    let res = await this.#put(path, data, sha, message);
+  // Read-modify-write. updateFn receives the current data and returns the new data.
+  //
+  // On conflict (409/422 = someone committed since we read) we re-read and run
+  // updateFn AGAIN against the fresh data. Retrying with only a fresh sha would
+  // re-submit our stale snapshot and silently erase the other commit -- which is
+  // exactly the data loss the retry exists to prevent.
+  //
+  // Returns the data that was written, so the caller can update its in-memory copy.
+  async update(path, fallback, updateFn, message) {
+    const first = await this.readJson(path, fallback);
+    let data = updateFn(first.data);
+    let res = await this.#put(path, data, first.sha, message);
+
     if (res.status === 409 || res.status === 422) {
-      const { sha: fresh } = await this.readJson(path);
-      res = await this.#put(path, data, fresh, message);
+      const fresh = await this.readJson(path, fallback);
+      data = updateFn(fresh.data);
+      res = await this.#put(path, data, fresh.sha, message);
     }
+
     if (!res.ok) await this.#fail(res);
-    return res.json();
+    return data;
   }
 }
 ```
@@ -754,7 +862,7 @@ export class GitHubStore {
 cd ~/Documents/plants-nfc && npm test
 ```
 
-Expected: PASS，29 passing
+Expected: PASS，33 passing
 
 - [ ] **Step 5: 提交**
 
@@ -800,7 +908,7 @@ git add -A && git commit -m "Add GitHub Contents API client with conflict retry"
 要求（具体 CSS 在实现时写）：
 
 - `<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">` —— 少了这行手机上会缩得很小
-- `<meta name="apple-mobile-web-app-capable" content="yes">` —— 支持加到主屏后全屏
+- **不要**加 `apple-mobile-web-app-capable`。它暗示「加到主屏当 App 用」，但 NFC 打开的链接一律走 Safari、进不了主屏 App，而且两边的 localStorage 是分开的，等于要配两次 token。
 - 单个 `<style>` 块，暖纸色背景 + 粗黑边的方块风格
 - 所有可点区域最小 44×44 px（iOS 的可点击下限）
 - `<div id="app"></div>` 作为唯一挂载点
@@ -845,7 +953,7 @@ git add -A && git commit -m "Add page shell, styles, and token setup flow"
 按 spec 第 5.1 节：
 
 - 从 `parsePlantId(location.search)` 拿植物代号
-- 并行 `readJson('config.json')` 和 `readJson('log.json')`，把两个 sha 记在内存里
+- 并行 `readJson('config.json')` 和 `readJson('log.json', [])` 取初始数据。**不要在 app 层记 sha** —— `store.update()` 自己管
 - 代号在 `config.plants` 里查不到 → 渲染「这盆还没名字，取一个？」的取名界面（Task 9 处理）
 - 顶部：植物名 + 「上次施肥 8/30 · 7 天前」
 - 有上次记录时显示大按钮「今天也施 {上次的肥}」；从没记录过则隐藏这个按钮
@@ -857,10 +965,13 @@ git add -A && git commit -m "Add page shell, styles, and token setup flow"
 点任意肥料按钮：
 
 1. 按钮立刻进入「记录中…」的禁用态，防止连点记两笔
-2. `addEntry(log, id, todayLocal(), fert)`
-3. `writeJson('log.json', newLog, logSha, \`${植物名} ${肥料名}\`)`
-4. 成功 → 更新内存里的 log 和 sha，重新渲染，顶部给一条「已记录」提示
-5. **失败 → 明确显示「没存上：{错误}」并把按钮恢复可点**，内存里的 log 回滚到写之前。绝不能假装成功
+2. 调 `store.update('log.json', [], (log) => addEntry(log, id, todayLocal(), fert), message)`
+
+   传函数而不是算好的数组，是为了让冲突重试能在最新数据上重放这次追加（见 Task 6 的接口说明）。
+3. 成功 → `update` 的返回值就是新的 log，用它替换内存里的副本，重新渲染，顶部给一条「已记录」提示
+4. **失败 → 明确显示「没存上：{错误}」并把按钮恢复可点**，内存里的 log 保持原样。绝不能假装成功
+
+> ⚠️ commit message 的写法待 Annie 确认，见文末「待确认」一节。
 
 - [ ] **Step 3: 本地验证**
 
@@ -884,10 +995,23 @@ git add -A && git commit -m "Add single-plant view with one-tap repeat logging"
 - Modify: `src/app.js`
 - Modify: `index.html`（样式）
 
+- [ ] **Step 0: 统一处理 `prompt()` 被取消**
+
+本任务所有输入都用 `prompt()`，而用户点「取消」时它返回 `null`。手机上误触取消是大概率事件，所以定一条规矩：
+
+```js
+// prompt() returns null on Cancel. Bail out silently rather than
+// letting null reach the logic layer.
+const name = prompt('肥料名字');
+if (name === null) return;
+```
+
+`logic.js` 里的 `addFertilizer` / `addPlant` / `renameFertilizer` 已经对 `null` 做了兜底（当空名处理并抛「名字不能为空」），但**调用点仍要先判 null 直接 return** —— 取消不该弹错误提示。
+
 - [ ] **Step 1: 未登记芯片的取名界面**
 
-- 输入框 + 「登记」按钮
-- `addPlant(config, id, name)` → `writeJson('config.json', ...)`
+- 输入框 + 「登记」按钮（这里用真的 `<input>`，不用 `prompt()`）
+- `store.update('config.json', null, (cfg) => addPlant(cfg, id, name), message)`
 - 成功后直接进入该植物的单盆页面
 
 - [ ] **Step 2: 编辑态开关**
@@ -895,24 +1019,26 @@ git add -A && git commit -m "Add single-plant view with one-tap repeat logging"
 - 右上角「✏️编辑」按钮切换 `editing` 状态
 - 编辑态下每个肥料按钮角上显示 ✏️ 和 🗑
 - **编辑态下点按钮本体不记录**，避免误记
+- 编辑态里放一个「清除 token」入口
 
 - [ ] **Step 3: 新增肥料**
 
-- 网格末尾虚线「＋」按钮 → `prompt()` 输入名字 → `addFertilizer` → 写 config
+- 网格末尾虚线「＋」按钮 → `prompt()` 输入名字（按 Step 0 判 null）→ `addFertilizer` → `store.update('config.json', ...)`
 - `addFertilizer` 抛的错（空名/重名）直接显示出来
 
 - [ ] **Step 4: 重命名（带历史询问）**
 
-1. `prompt()` 输入新名字
+1. `prompt()` 输入新名字，按 Step 0 判 null
 2. `countFertilizerUses(log, oldName)` 算出历史条数
 3. 条数 > 0 时 `confirm('历史里的 N 条旧名字也一起改吗？')`；条数为 0 时跳过询问，直接按 `false` 处理
-4. `renameFertilizer(config, log, old, new, alsoHistory)`
+4. `renameFertilizer(config, log, old, new, alsoHistory)` 先在内存里算一遍，把它抛的错（空名、重名、撞上隐藏项）显示出来
 5. `alsoHistory` 为真时要写**两个**文件。先写 `log.json` 再写 `config.json`；若第二个写失败，提示「历史已改但按钮名没改成功，请重试」——说清楚状态，不要让用户以为什么都没发生
+6. 这里是背靠背两次写入，**最容易撞上 GitHub 的二级限流**（短时间内连续写同一仓库会被挡）。`github.js` 已经把这种 403 翻译成「操作太快了，等一分钟再试」，UI 直接把这句话显示出来就行
 
 - [ ] **Step 5: 删除（只隐藏）**
 
 - `confirm('把「X」从列表里拿掉？历史记录不受影响。')`
-- `hideFertilizer` → 写 config
+- `hideFertilizer` → `store.update('config.json', ...)`
 
 - [ ] **Step 6: 本地把每条路径都点一遍**
 
@@ -961,7 +1087,18 @@ git add -A && git commit -m "Add home overview sorted by staleness"
 
 内容：这是什么、怎么配 token、怎么给芯片写网址、本地怎么跑测试。
 
-- [ ] **Step 2: 建远程仓库并推送**
+必须包含这两条，否则 Annie 迟早会被卡住：
+
+- **token 会被自动清掉。** iOS Safari 会删除 7 天未访问站点的 localStorage。冬天两周没碰植物，再打开就退回配置页。**token 要另存一份**（备忘录或密码管理器），重贴一次即可，数据不会丢——数据在 GitHub 上。
+- **改代码前先 `git pull --rebase`。** 手机每记一笔就在远端 `main` 上多一个 commit，本地不拉就直接改，下次 push 会被拒。
+
+- [ ] **Step 2: 先关掉公开邮箱（Annie 手动操作，必须在建仓库之前）**
+
+打开 `https://github.com/settings/emails`，确认 **Keep my email address private** 已勾选。
+
+> 为什么单独一步：spec 7.3 配的是仓库级 `user.email`，那只管 Mac 上 `git commit`。手机每记一笔走的是 GitHub API，作者邮箱取的是**账号设置里的默认值**，本地配置管不着。仓库是 public，这里没勾的话每一笔施肥记录都会带上真实邮箱，而且**已经提交的改不掉**。
+
+- [ ] **Step 3: 建远程仓库并推送**
 
 ⚠️ **推送前必须先给 Annie 看 diff 并等她明确说「推」**（用户全局规则）。
 
@@ -971,7 +1108,7 @@ gh repo create pyyannie/plants --public --source=. --remote=origin
 git push -u origin main
 ```
 
-- [ ] **Step 3: 开 GitHub Pages**
+- [ ] **Step 4: 开 GitHub Pages**
 
 ```bash
 gh api -X POST repos/pyyannie/plants/pages -f 'source[branch]=main' -f 'source[path]=/'
@@ -979,26 +1116,39 @@ gh api -X POST repos/pyyannie/plants/pages -f 'source[branch]=main' -f 'source[p
 
 等约 1 分钟，确认 `https://pyyannie.github.io/plants/` 能打开。
 
-- [ ] **Step 4: 生成 fine-grained token（Annie 手动操作）**
+- [ ] **Step 5: 生成 fine-grained token（Annie 手动操作）**
 
 `https://github.com/settings/personal-access-tokens/new`
 
 - Repository access：**Only select repositories** → `pyyannie/plants`
 - Permissions → Repository permissions → **Contents: Read and write**
 - 其他权限一律不给
+- 生成后**立刻另存一份**（见 Step 1）
 
-- [ ] **Step 5: 手机上跑一遍**
+- [ ] **Step 6: 手机上跑一遍**
 
 1. 手机 Safari 打开 `https://pyyannie.github.io/plants/`，贴 token
 2. 装 NFC Tools，给一枚芯片写 `https://pyyannie.github.io/plants/?p=test1`
 3. 碰一下 → 点横幅 → 取名 → 记一笔
-4. 去 GitHub 看 commit 是否出现
+4. 去 GitHub 看 commit 是否出现，**确认作者邮箱是 noreply 而不是真实邮箱**
 
-- [ ] **Step 6: 剩下的芯片批量写入**
+> 这一步是唯一能验出 `fetchImpl` 绑定问题的地方。浏览器的 `fetch` 有身份校验，`this` 不对会抛 `Illegal invocation`，而 Node 没有这个校验——所以 33 个测试全绿也不代表手机上能跑。真机点通了才算数。
+
+- [ ] **Step 7: 剩下的芯片批量写入**
 
 每盆一枚，代号用拼音。写完逐个碰一次取名。
 
 ⚠️ 贴纸不要直接贴金属花盆，会读不到，需要垫防磁贴。
+
+---
+
+## 待确认（开工前问 Annie）
+
+1. **与 spec 的偏离**：单文件改成 `index.html` + `src/` 下三个 js（见文首）。
+2. **应用自动生成的 commit message 用什么语言。** 全局规则第 6 条说写进 git/GitHub 的文字用英文，但手机记一笔时程序会自动生成 message，内容天然带中文植物名和肥料名。三个选项：
+   - `Log guibeizhu / 花多多#01` —— 英文动词 + 原始数据，兼顾规则和可读性
+   - `龟背竹 花多多#01` —— 纯中文，需要 Annie 明确豁免（数据提交不算代码提交）
+   - `Log fertilizing` —— 纯英文，但翻历史时看不出是哪盆
 
 ---
 
@@ -1008,4 +1158,5 @@ gh api -X POST repos/pyyannie/plants/pages -f 'source[branch]=main' -f 'source[p
 - commit message 用英文（用户全局规则第 6 条）
 - 代码注释用英文（用户全局规则第 8 条）
 - **任何 `git push` 前先给 Annie 看 diff，等她明确说「推」**（用户全局规则第 5 条）
+- 上线之后每次改代码前先 `git pull --rebase`，手机记的那些 commit 在远端
 - Task 7 的视觉风格是人工检查点，不要自己拍板
