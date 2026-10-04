@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>植物施肥记录 · 本地试玩</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { boot } from '../src/app.js';
+    import { GitHubStore } from '../src/github.js';
+    import { fakeFetch } from './fake-fetch.js';
+
+    boot({
+      skipToken: true,
+      createStore: () => new GitHubStore({ token: 'dev', fetchImpl: fakeFetch }),
+    });
+  </script>
+</body>
+</html>
