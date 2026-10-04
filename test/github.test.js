@@ -38,15 +38,50 @@ test('paths with Chinese characters are URL-encoded segment by segment', async (
   assert.match(seen, /contents\/photos\/%E9%BE%9F%E8%83%8C%E7%AB%B9\.jpg/);
 });
 
-test('readJson defeats caching two ways', async () => {
-  let seen;
+test('reads defeat caching without a Cache-Control header', async () => {
+  const seen = [];
   const store = makeStore(async (url, opts) => {
-    seen = opts;
+    seen.push({ url, opts });
     return ok({ content: encodeBase64Utf8('{}'), sha: 'abc' });
   });
   await store.readJson('config.json');
-  assert.equal(seen.headers['Cache-Control'], 'no-cache');
-  assert.equal(seen.cache, 'no-store');
+  await store.readJson('config.json');
+  assert.equal(seen[0].opts.cache, 'no-store');
+  assert.match(seen[0].url, /[?&]_=\d+/, 'cache-busting timestamp in the URL');
+  assert.notEqual(seen[0].url, seen[1].url, 'each read uses a distinct URL');
+});
+
+// Copied from api.github.com's CORS preflight response (checked 2026-10-05).
+// Any other request header makes the browser block the request before it is
+// sent, which node tests cannot otherwise notice.
+const CORS_ALLOWED = [
+  'authorization', 'content-type', 'if-match', 'if-modified-since', 'if-none-match',
+  'if-unmodified-since', 'accept-encoding', 'x-github-otp', 'x-requested-with',
+  'user-agent', 'graphql-features', 'x-github-next-global-id', 'x-github-api-version',
+];
+// Safelisted headers that never need preflight permission.
+const CORS_SAFELISTED = ['accept', 'accept-language', 'content-language'];
+
+test('every request header is one GitHub allows cross-origin', async () => {
+  const sent = new Set();
+  const store = makeStore(async (url, opts) => {
+    Object.keys(opts?.headers ?? {}).forEach((k) => sent.add(k.toLowerCase()));
+    if (opts?.method === 'PUT') return ok({});
+    if (!/contents/.test(url)) return ok({});
+    return ok({ content: encodeBase64Utf8('[]'), sha: 'abc' });
+  });
+  await store.checkAccess();
+  await store.update('log.json', [], (l) => l, 'msg');
+  await store.readBinary('photos/a.jpg');
+  await store.writeBinary('photos/a.jpg', new Uint8Array([1]), 'msg');
+  for (const h of sent) {
+    assert.ok(CORS_ALLOWED.includes(h) || CORS_SAFELISTED.includes(h), `header not allowed by CORS: ${h}`);
+  }
+});
+
+test('a browser network failure is explained instead of showing "Load failed"', async () => {
+  const store = makeStore(async () => { throw new TypeError('Load failed'); });
+  await assert.rejects(() => store.readJson('config.json'), /连不上 GitHub/);
 });
 
 test('readJson returns the fallback and a null sha when the file does not exist', async () => {

@@ -1,6 +1,8 @@
 import { encodeBase64Utf8, decodeBase64Utf8, bytesToBase64, base64ToBytes } from './logic.js';
 
 const API = 'https://api.github.com';
+// Appended to read URLs so two reads in the same millisecond still differ.
+let readSeq = 0;
 
 export class GitHubStore {
   // fetchImpl is injectable so the tests can run without a network.
@@ -31,11 +33,20 @@ export class GitHubStore {
       Authorization: `Bearer ${this.token}`,
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
-      // api.github.com sends `Cache-Control: private, max-age=60` on authenticated
-      // requests. Without this, iOS Safari can serve a stale copy for a minute and
-      // a just-logged entry appears to have vanished.
-      'Cache-Control': 'no-cache',
+      // Do NOT add Cache-Control or any other header missing from api.github.com's
+      // CORS allow-list: the browser then blocks every request before it is sent
+      // and Safari only says "Load failed". test/github.test.js guards this.
     };
+  }
+
+  // fetch rejects with a bare TypeError ("Load failed" in Safari) when the network
+  // is down or the browser blocks the request. Say what that means in words.
+  async #fetch(url, opts) {
+    try {
+      return await this.fetchImpl(url, opts);
+    } catch (e) {
+      throw new Error(`连不上 GitHub（网络问题，或者浏览器拦下了请求）：${e.message}`);
+    }
   }
 
   async #fail(res) {
@@ -56,7 +67,10 @@ export class GitHubStore {
   // GET a contents entry. Returns null on 404 so callers can treat a missing
   // file as empty data.
   async #get(path) {
-    const res = await this.fetchImpl(`${this.#url(path)}?ref=${this.branch}`, {
+    // api.github.com answers authenticated reads with `Cache-Control: private,
+    // max-age=60`, so a just-logged entry could look lost for a minute. Defeat it
+    // with no-store plus a unique URL; a request header would break CORS.
+    const res = await this.#fetch(`${this.#url(path)}?ref=${this.branch}&_=${Date.now()}${++readSeq}`, {
       headers: this.#headers(),
       cache: 'no-store',
     });
@@ -66,7 +80,7 @@ export class GitHubStore {
   }
 
   async #put(path, base64, sha, message) {
-    return this.fetchImpl(this.#url(path), {
+    return this.#fetch(this.#url(path), {
       method: 'PUT',
       headers: { ...this.#headers(), 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -82,7 +96,7 @@ export class GitHubStore {
   // Check the repo itself once at token setup so the second case is not mistaken
   // for "no data yet".
   async checkAccess() {
-    const res = await this.fetchImpl(`${API}/repos/${this.owner}/${this.repo}`, {
+    const res = await this.#fetch(`${API}/repos/${this.owner}/${this.repo}`, {
       headers: this.#headers(),
       cache: 'no-store',
     });
