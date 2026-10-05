@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   todayLocal, formatShortDate, daysSince, entriesFor, lastFertEntry, lastNoteEntry,
   visibleFertilizers, addFertilizer, hideFertilizer, countFertilizerUses, renameFertilizer,
-  parsePlantId, addPlant, renamePlant, addEntry, plantOverview,
+  parsePlantId, addPlant, renamePlant, addEntry, plantOverview, checkLogDate, deleteEntry,
   encodeBase64Utf8, decodeBase64Utf8, bytesToBase64, base64ToBytes,
 } from '../src/logic.js';
 
@@ -191,4 +191,45 @@ test('bytesToBase64 / base64ToBytes round-trip binary data', () => {
   const bytes = new Uint8Array(70000).map((_, i) => (i * 7) % 256);
   const back = base64ToBytes(bytesToBase64(bytes));
   assert.deepEqual(back, bytes);
+});
+
+// --- backfill dates and deleting entries ---
+
+test('checkLogDate accepts today and past days but rejects the future', () => {
+  assert.doesNotThrow(() => checkLogDate('2026-10-05', '2026-10-05'));
+  assert.doesNotThrow(() => checkLogDate('2026-10-03', '2026-10-05'));
+  assert.throws(() => checkLogDate('2026-10-06', '2026-10-05'), /日期选错了/);
+  assert.throws(() => checkLogDate('', '2026-10-05'), /日期/);
+});
+
+test('a backfilled entry sorts into place and updates the days count', () => {
+  const log = addEntry(LOG, '琴叶榕', '2026-09-04', '花多多10');
+  assert.equal(lastFertEntry(log, '琴叶榕').fert, '花多多10');
+  assert.equal(plantOverview(CONFIG, log, '2026-09-06').find((r) => r.id === '琴叶榕').days, 2);
+  const older = addEntry(LOG, '琴叶榕', '2026-08-01', '花多多10');
+  assert.equal(lastFertEntry(older, '琴叶榕').fert, '磷酸二氢钾', 'an older backfill must not become "last"');
+});
+
+test('deleteEntry removes the matching entry by content without mutating the input', () => {
+  const next = deleteEntry(LOG, { p: '龟背竹', date: '2026-08-30', fert: '花多多01', note: '新叶有点黄' });
+  assert.equal(next.length, 3);
+  assert.equal(next.some((e) => e.date === '2026-08-30'), false);
+  assert.equal(LOG.length, 4);
+});
+
+test('deleteEntry tells note-only and fertilizer entries apart', () => {
+  const log = [
+    { p: 'a', date: '2026-10-01', fert: '花多多01' },
+    { p: 'a', date: '2026-10-01', fert: '花多多01', note: '稀释' },
+  ];
+  assert.deepEqual(deleteEntry(log, { p: 'a', date: '2026-10-01', fert: '花多多01' }), [log[1]]);
+});
+
+test('deleteEntry removes only one of two identical entries', () => {
+  const e = { p: 'a', date: '2026-10-01', fert: '花多多01' };
+  assert.equal(deleteEntry([e, { ...e }], e).length, 1);
+});
+
+test('deleteEntry explains when the entry is already gone', () => {
+  assert.throws(() => deleteEntry(LOG, { p: '龟背竹', date: '2000-01-01', fert: 'x' }), /已经不在了/);
 });

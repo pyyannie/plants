@@ -141,6 +141,31 @@ export function addEntry(log, plantId, date, fert, rawNote = '') {
   return [...log, entry];
 }
 
+// Backfilling a past day is allowed; a future day is always a mis-pick.
+// The date picker is left unrestricted on purpose: Annie wants a loud error
+// rather than a picker that silently refuses.
+export function checkLogDate(date, todayIso) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? '')) throw new Error('日期格式不对');
+  if (date > todayIso) {
+    throw new Error(`${formatShortDate(date)} 还没到，日期选错了`);
+  }
+}
+
+const sameEntry = (a, b) =>
+  a.p === b.p &&
+  a.date === b.date &&
+  (a.fert ?? null) === (b.fert ?? null) &&
+  (a.note ?? null) === (b.note ?? null);
+
+// Removes one entry equal to target. Matching by content rather than array
+// index keeps the delete correct when update() re-applies it to fresh data
+// after a conflict, where indexes may have shifted.
+export function deleteEntry(log, target) {
+  const i = log.findLastIndex((e) => sameEntry(e, target));
+  if (i === -1) throw new Error('这条记录已经不在了，可能在别的手机上删过');
+  return [...log.slice(0, i), ...log.slice(i + 1)];
+}
+
 // One row per plant, most overdue first. Plants never fertilized sort to the
 // very top -- those are the ones most likely to have been forgotten.
 export function plantOverview(config, log, todayIso) {

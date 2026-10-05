@@ -2,7 +2,7 @@ import { GitHubStore } from './github.js';
 import {
   todayLocal, formatShortDate, daysSince, entriesFor, lastFertEntry, lastNoteEntry,
   visibleFertilizers, addFertilizer, hideFertilizer, countFertilizerUses, renameFertilizer,
-  parsePlantId, addPlant, renamePlant, addEntry, plantOverview,
+  parsePlantId, addPlant, renamePlant, addEntry, plantOverview, checkLogDate, deleteEntry,
 } from './logic.js';
 
 const TOKEN_KEY = 'plants.token';
@@ -28,6 +28,8 @@ const state = {
   editing: false,
   busy: false,
   noteDraft: '',
+  // null = today. Holds a YYYY-MM-DD only while backfilling a past day.
+  logDate: null,
 };
 // plant id -> object URL, or null when the plant is known to have no photo.
 const photoUrls = new Map();
@@ -63,6 +65,19 @@ function toast(text, isError = false) {
   const el = h('div', { class: isError ? 'toast error' : 'toast' }, text);
   document.body.append(el);
   toastTimer = setTimeout(() => el.remove(), isError ? 6000 : 2000);
+}
+
+// A big blocking notice for mistakes that must not slip by, unlike a toast.
+function modal(title, text) {
+  const close = () => backdrop.remove();
+  const backdrop = h('div', { class: 'modal-backdrop' },
+    h('div', { class: 'modal', role: 'alertdialog' },
+      h('div', { class: 'modal-title' }, title),
+      h('p', {}, text),
+      h('button', { onclick: close }, '知道了'),
+    ),
+  );
+  document.body.append(backdrop);
 }
 
 function daysText(days) {
@@ -299,6 +314,7 @@ function renderPlant() {
     ),
     !editing && h('label', { class: 'note-label' }, '备注（可不填）'),
     !editing && h('div', { class: 'note-row' }, noteBox, okButton),
+    !editing && dateRow(),
     h('h2', {}, '历史'),
     historyList(id),
     h('div', { class: 'footer-actions' },
@@ -307,6 +323,40 @@ function renderPlant() {
     ),
   );
   loadPhoto(id);
+}
+
+// The native date input sits invisibly on top of the row, so tapping anywhere
+// opens the iOS date wheel while the row shows our own wording.
+function dateRow() {
+  const today = todayLocal();
+  const date = state.logDate ?? today;
+  const backfilling = date !== today;
+  const input = h('input', {
+    type: 'date',
+    class: 'date-input',
+    value: date,
+    'aria-label': '记录日期',
+    onchange: () => {
+      const picked = input.value || today;
+      try {
+        checkLogDate(picked, todayLocal());
+      } catch (e) {
+        modal('⚠️ 日期选错了', `${e.message}。日期已经改回今天，这一笔没有记录。`);
+        state.logDate = null;
+        renderPlant();
+        return;
+      }
+      state.logDate = picked === todayLocal() ? null : picked;
+      renderPlant();
+    },
+  });
+  return h('label', { class: backfilling ? 'date-row past' : 'date-row' },
+    backfilling
+      ? `📅 记在 ${formatShortDate(date)}（不是今天）`
+      : `📅 日期：今天 ${formatShortDate(today)}`,
+    h('span', { class: 'chevron' }, '▾'),
+    input,
+  );
 }
 
 function historyList(id) {
@@ -319,8 +369,30 @@ function historyList(id) {
         e.fert && h('span', { class: 'fert' }, e.fert),
         e.note && (e.fert ? h('span', { class: 'note' }, e.note) : `📝 ${e.note}`),
       ),
+      state.editing && h('button', {
+        class: 'del',
+        onclick: () => onDeleteEntry(e),
+        'aria-label': '删除这条记录',
+      }, '🗑'),
     ),
   ));
+}
+
+async function onDeleteEntry(entry) {
+  const what = [entry.fert, entry.note && `📝 ${entry.note}`].filter(Boolean).join(' ');
+  if (!confirm(`删掉这条记录？\n\n${formatShortDate(entry.date)}  ${what}`)) return;
+  const name = plantName(state.plantId);
+  try {
+    state.log = await store.update(
+      'log.json', [],
+      (log) => deleteEntry(log, entry),
+      `Delete ${name} / ${entry.date} / ${entry.fert ?? 'note'}`,
+    );
+    toast('✅ 已删除');
+  } catch (e) {
+    toast(`没删掉：${e.message}`, true);
+  }
+  renderPlant();
 }
 
 // fert === null means "note only".
@@ -329,6 +401,17 @@ async function logEntry(fert) {
   const id = state.plantId;
   const note = state.noteDraft;
   const name = plantName(id);
+  // Checked again at save time: the page may have stayed open past midnight
+  // since the date was picked.
+  const date = state.logDate ?? todayLocal();
+  try {
+    checkLogDate(date, todayLocal());
+  } catch (e) {
+    modal('⚠️ 日期选错了', `${e.message}。日期已经改回今天，这一笔没有记录。`);
+    state.logDate = null;
+    renderPlant();
+    return;
+  }
   state.busy = true;
   renderPlant();
   try {
@@ -336,10 +419,12 @@ async function logEntry(fert) {
     // this append on top of whatever another device just wrote.
     state.log = await store.update(
       'log.json', [],
-      (log) => addEntry(log, id, todayLocal(), fert, note),
+      (log) => addEntry(log, id, date, fert, note),
       fert ? `Log ${name} / ${fert}` : `Note ${name}`,
     );
     state.noteDraft = '';
+    // Back to today after every save so the next entry is not misdated by accident.
+    state.logDate = null;
     toast('✅ 已记录');
   } catch (e) {
     // Keep the note text so the user can simply tap again.
