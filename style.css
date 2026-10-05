@@ -162,6 +162,7 @@ textarea { min-height: 72px; resize: vertical; }
 .status-item + .status-item { border-top: 1px solid rgba(255, 255, 255, 0.2); }
 .status-label { font-size: 14px; color: var(--muted); font-weight: 600; }
 .status-value { font-size: 19px; font-weight: 700; margin-top: 2px; word-break: break-word; }
+.status-days { font-size: 19px; font-weight: 700; margin-top: 2px; color: var(--muted); }
 .status-note { font-size: 17px; margin-top: 4px; word-break: break-word; white-space: pre-wrap; }
 
 /* --- logging --- */

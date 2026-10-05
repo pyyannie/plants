@@ -479,10 +479,11 @@ function renderPlant() {
 
   const statusItems = [];
   if (lastFert) {
+    const days = daysSince(lastFert.date, todayLocal());
     statusItems.push(h('div', { class: 'status-item' },
-      h('div', { class: 'status-label' },
-        `🌱 上次施肥 · ${formatShortDate(lastFert.date)} · ${daysText(daysSince(lastFert.date, todayLocal()))}`),
+      h('div', { class: 'status-label' }, `🌱 上次施肥 · ${formatShortDate(lastFert.date)}`),
       h('div', { class: 'status-value' }, lastFert.fert),
+      h('div', { class: 'status-days' }, days === 0 ? '今天刚施过' : `距离上次 ${days} 天`),
       // Same entry carries the newest note: show it here instead of repeating it below.
       lastNote === lastFert && h('div', { class: 'status-note' }, `📝 ${lastNote.note}`),
     ));
