@@ -280,3 +280,25 @@ export function setAvatarCrop(config, id, crop) {
   else delete avatars[id];
   return { ...config, avatars };
 }
+
+// --- export ---
+
+// RFC 4180 quoting: wrap in quotes when the value has a comma, quote or line
+// break, and double any quotes inside.
+const csvCell = (v) => {
+  const s = v == null ? '' : String(v);
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+// Every entry as a spreadsheet row, newest first. A plant that has since been
+// deleted falls back to its id for the name. Lines end in CRLF, which Excel
+// expects; the caller adds a UTF-8 BOM so Excel does not garble the Chinese.
+export function recordsToCsv(config, log) {
+  const rows = log
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => (a.e.date < b.e.date ? 1 : a.e.date > b.e.date ? -1 : b.i - a.i))
+    .map(({ e }) => [config.plants[e.p] ?? e.p, e.p, e.date, e.fert, e.note]);
+  return [['植物名', '植物代号', '日期', '肥料', '备注'], ...rows]
+    .map((r) => r.map(csvCell).join(','))
+    .join('\r\n');
+}

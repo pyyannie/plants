@@ -4,6 +4,7 @@ import {
   visibleFertilizers, addFertilizer, hideFertilizer, countFertilizerUses, renameFertilizer,
   parsePlantId, addPlant, renamePlant, addEntry, plantOverview, checkLogDate, deleteEntry,
   avatarLayout, clampCrop, setAvatarCrop, changeEntryDate, removePlant, removePlantEntries,
+  recordsToCsv,
 } from './logic.js';
 
 const TOKEN_KEY = 'plants.token';
@@ -881,12 +882,28 @@ async function loadThumbs(ids, slots) {
   }));
 }
 
+// Saves every record as a CSV into the Files app. The BOM tells Excel the file
+// is UTF-8; without it Chinese names open as garbage.
+function downloadRecords() {
+  const csv = recordsToCsv(state.config, state.log);
+  const url = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }));
+  const a = h('a', { href: url, download: `annies-plants-${todayLocal()}.csv`, hidden: true });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
 function renderHome() {
   const rows = plantOverview(state.config, state.log, todayLocal());
   const miniAvatars = new Map(rows.map((r) => [r.id, h('span', { class: 'mini-avatar empty' }, '🪴')]));
   const tagUrl = `${location.origin}${location.pathname}?p=植物名`;
   mount(
-    h('h1', {}, '🌱 全部植物'),
+    h('div', { class: 'home-head' },
+      h('h1', {}, '🌱 全部植物'),
+      state.log.length > 0 &&
+        h('button', { class: 'download', onclick: downloadRecords, 'aria-label': '下载所有记录' }, '⬇️'),
+    ),
     rows.length
       ? h('p', { class: 'muted small' }, '按距上次施肥的天数排序，最久没施的在最上面')
       : h('div', { class: 'card' },

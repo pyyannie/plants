@@ -442,3 +442,14 @@ textarea { min-height: 72px; resize: vertical; }
 }
 .mini-avatar.empty { border-style: dashed; opacity: 0.7; }
 .mini-avatar img { position: absolute; max-width: none; display: block; }
+
+/* --- home header with download --- */
+
+.home-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.home-head .download {
+  flex: none;
+  width: 48px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 20px;
+}

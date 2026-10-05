@@ -5,6 +5,7 @@ import {
   visibleFertilizers, addFertilizer, hideFertilizer, countFertilizerUses, renameFertilizer,
   parsePlantId, addPlant, renamePlant, addEntry, plantOverview, checkLogDate, deleteEntry,
   avatarLayout, clampCrop, setAvatarCrop, changeEntryDate, removePlant, removePlantEntries,
+  recordsToCsv,
   encodeBase64Utf8, decodeBase64Utf8, bytesToBase64, base64ToBytes,
 } from '../src/logic.js';
 
@@ -308,4 +309,21 @@ test('removePlantEntries drops every entry of that plant only', () => {
   const next = removePlantEntries(LOG, '龟背竹');
   assert.deepEqual(next.map((e) => e.p), ['琴叶榕']);
   assert.equal(LOG.length, 4);
+});
+
+test('recordsToCsv lists every entry newest first with plant names', () => {
+  const lines = recordsToCsv(CONFIG, LOG).split('\r\n');
+  assert.equal(lines[0], '植物名,植物代号,日期,肥料,备注');
+  assert.deepEqual(lines.slice(1), [
+    '龟背竹,龟背竹,2026-09-03,,发现有虫',
+    '琴叶榕,琴叶榕,2026-09-02,磷酸二氢钾,',
+    '龟背竹,龟背竹,2026-08-30,花多多01,新叶有点黄',
+    '龟背竹,龟背竹,2026-08-02,花多多02,',
+  ]);
+});
+
+test('recordsToCsv quotes commas, quotes and line breaks', () => {
+  const log = [{ p: 'x', date: '2026-10-01', fert: 'A', note: '稀释, "1000"倍\n第二行' }];
+  const row = recordsToCsv({ plants: {} }, log).split('\r\n').slice(1).join('\r\n');
+  assert.equal(row, 'x,x,2026-10-01,A,"稀释, ""1000""倍\n第二行"');
 });
