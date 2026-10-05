@@ -4,7 +4,7 @@ import {
   todayLocal, formatShortDate, daysSince, entriesFor, lastFertEntry, lastNoteEntry,
   visibleFertilizers, addFertilizer, hideFertilizer, countFertilizerUses, renameFertilizer,
   parsePlantId, addPlant, renamePlant, addEntry, plantOverview, checkLogDate, deleteEntry,
-  avatarLayout, clampCrop, setAvatarCrop,
+  avatarLayout, clampCrop, setAvatarCrop, changeEntryDate,
   encodeBase64Utf8, decodeBase64Utf8, bytesToBase64, base64ToBytes,
 } from '../src/logic.js';
 
@@ -274,4 +274,23 @@ test('setAvatarCrop stores a crop per plant and null removes it', () => {
   assert.deepEqual(rounded.avatars['龟背竹'], { zoom: 3.3333, x: 0.4231, y: 0.5615 });
   const cleared = setAvatarCrop(withCrop, '龟背竹', null);
   assert.equal(cleared.avatars['龟背竹'], undefined);
+});
+
+test('changeEntryDate moves one matching entry to a new date, keeping its other fields', () => {
+  const target = { p: '龟背竹', date: '2026-08-30', fert: '花多多01', note: '新叶有点黄' };
+  const next = changeEntryDate(LOG, target, '2026-08-28');
+  const moved = next.filter((e) => e.date === '2026-08-28');
+  assert.deepEqual(moved, [{ ...target, date: '2026-08-28' }]);
+  assert.equal(next.length, LOG.length);
+  assert.equal(LOG[2].date, '2026-08-30', 'original log must not be mutated');
+});
+
+test('changeEntryDate changes only one of two identical entries', () => {
+  const e = { p: 'a', date: '2026-10-05', fert: 'HB101' };
+  const next = changeEntryDate([e, { ...e }], e, '2026-10-03');
+  assert.deepEqual(next.map((x) => x.date).sort(), ['2026-10-03', '2026-10-05']);
+});
+
+test('changeEntryDate explains when the entry is already gone', () => {
+  assert.throws(() => changeEntryDate(LOG, { p: 'x', date: '2000-01-01' }, '2026-01-01'), /已经不在了/);
 });

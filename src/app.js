@@ -3,7 +3,7 @@ import {
   todayLocal, formatShortDate, daysSince, entriesFor, lastFertEntry, lastNoteEntry,
   visibleFertilizers, addFertilizer, hideFertilizer, countFertilizerUses, renameFertilizer,
   parsePlantId, addPlant, renamePlant, addEntry, plantOverview, checkLogDate, deleteEntry,
-  avatarLayout, clampCrop, setAvatarCrop,
+  avatarLayout, clampCrop, setAvatarCrop, changeEntryDate,
 } from './logic.js';
 
 const TOKEN_KEY = 'plants.token';
@@ -506,6 +506,8 @@ function renderPlant() {
   mount(
     heroBlock(id),
     h('div', { class: 'status' }, statusItems),
+    // Above the buttons: the order of use is pick a date, then tap a fertilizer.
+    !editing && dateRow(),
     editing && h('p', { class: 'muted small', style: 'margin-top:20px' }, '编辑中：点按钮不会打卡'),
     !editing && bigName && h('button', {
       class: 'repeat',
@@ -518,7 +520,6 @@ function renderPlant() {
     ),
     !editing && h('label', { class: 'note-label' }, '备注（可不填）'),
     !editing && h('div', { class: 'note-row' }, noteBox, okButton),
-    !editing && dateRow(),
     h('h2', {}, '历史'),
     historyList(id),
     h('div', { class: 'footer-actions' },
@@ -569,7 +570,18 @@ function historyList(id) {
   if (!entries.length) return h('p', { class: 'muted small' }, '还没有记录');
   return h('ul', { class: 'history' }, entries.map((e) =>
     h('li', {},
-      h('span', { class: 'date' }, formatShortDate(e.date)),
+      state.editing
+        ? h('label', { class: 'date editable' },
+            formatShortDate(e.date),
+            h('input', {
+              type: 'date',
+              class: 'date-input',
+              value: e.date,
+              'aria-label': '改这条的日期',
+              onchange: (ev) => onChangeEntryDate(e, ev.target.value),
+            }),
+          )
+        : h('span', { class: 'date' }, formatShortDate(e.date)),
       h('span', { class: 'what' },
         e.fert && h('span', { class: 'fert' }, e.fert),
         e.note && (e.fert ? h('span', { class: 'note' }, e.note) : `📝 ${e.note}`),
@@ -581,6 +593,29 @@ function historyList(id) {
       }, '🗑'),
     ),
   ));
+}
+
+async function onChangeEntryDate(entry, date) {
+  if (!date || date === entry.date) return;
+  try {
+    checkLogDate(date, todayLocal());
+  } catch (e) {
+    modal('⚠️ 日期选错了', `${e.message}。这条记录的日期没有改。`);
+    renderPlant();
+    return;
+  }
+  const name = plantName(state.plantId);
+  try {
+    state.log = await store.update(
+      'log.json', [],
+      (log) => changeEntryDate(log, entry, date),
+      `Redate ${name} / ${entry.fert ?? 'note'} ${entry.date} -> ${date}`,
+    );
+    toast(`✅ 已改到 ${formatShortDate(date)}`);
+  } catch (e) {
+    toast(`没改成：${e.message}`, true);
+  }
+  renderPlant();
 }
 
 async function onDeleteEntry(entry) {

@@ -166,6 +166,13 @@ export function deleteEntry(log, target) {
   return [...log.slice(0, i), ...log.slice(i + 1)];
 }
 
+// Same content matching as deleteEntry, so a conflict retry still finds it.
+export function changeEntryDate(log, target, date) {
+  const i = log.findLastIndex((e) => sameEntry(e, target));
+  if (i === -1) throw new Error('这条记录已经不在了，可能在别的手机上改过');
+  return log.map((e, j) => (j === i ? { ...e, date } : e));
+}
+
 // One row per plant, most overdue first. Plants never fertilized sort to the
 // very top -- those are the ones most likely to have been forgotten.
 export function plantOverview(config, log, todayIso) {
