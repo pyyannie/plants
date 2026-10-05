@@ -233,29 +233,59 @@ async function loadPhoto(id) {
   refreshPhoto(id);
 }
 
-// Swap just the photo block so a late-arriving photo does not wipe the note box.
+// Swap just the avatar header so a late-arriving photo does not wipe the note box.
 function refreshPhoto(id) {
   if (state.plantId !== id) return;
-  document.querySelector('.photo')?.replaceWith(photoBlock(id));
+  document.querySelector('.hero')?.replaceWith(heroBlock(id));
 }
 
-function photoBlock(id) {
-  if (!photoUrls.has(id)) {
-    return h('div', { class: 'photo empty' }, h('span', {}, '照片加载中…'));
-  }
+// Round avatar beside the name: a small circle hides how near or far each photo
+// was taken, so 30+ plants look consistent. Tap it for the full photo.
+function heroBlock(id) {
+  const { editing, uploading } = state;
+  const name = plantName(id);
   const url = photoUrls.get(id);
-  if (!url) {
-    return h('div', { class: 'photo empty', onclick: () => pickPhoto(id) },
+  let avatar;
+  if (!photoUrls.has(id)) {
+    avatar = h('div', { class: 'avatar empty' }, '…');
+  } else if (!url) {
+    avatar = h('button', { class: 'avatar empty', onclick: () => pickPhoto(id), 'aria-label': '加照片' },
       h('span', { class: 'icon' }, '📷'),
-      '点我加照片',
+      '加照片',
+    );
+  } else {
+    avatar = h('button', { class: 'avatar', onclick: () => showPhoto(url, name), 'aria-label': '看大图' },
+      h('img', { src: url, alt: name }),
+      uploading && h('span', { class: 'uploading' }, '⏳'),
     );
   }
-  return h('div', { class: 'photo' },
-    h('img', { src: url, alt: plantName(id) }),
-    state.uploading && h('div', { class: 'uploading' }, '⏳ 照片上传中，别关页面'),
-    state.editing && !state.uploading &&
-      h('button', { class: 'change', onclick: () => pickPhoto(id) }, '📷 换照片'),
+  return h('div', { class: 'hero' },
+    h('div', { class: 'avatar-wrap' },
+      avatar,
+      editing && url && !uploading &&
+        h('button', { class: 'change', onclick: () => pickPhoto(id), 'aria-label': '换照片' }, '📷'),
+    ),
+    h('div', { class: 'hero-right' },
+      h('h1', {}, name),
+      uploading && h('p', { class: 'uploading-note' }, '⏳ 照片上传中，别关页面'),
+      h('div', { class: 'hero-actions' },
+        editing && h('button', { class: 'rename', onclick: onRenamePlant, 'aria-label': '改名' }, '✏️ 改名'),
+        h('button', {
+          class: editing ? 'edit-toggle on' : 'edit-toggle',
+          onclick: () => { state.editing = !state.editing; renderPlant(); },
+        }, editing ? '完成' : '✏️ 编辑'),
+      ),
+    ),
   );
+}
+
+// Full photo over the page; tap anywhere to close.
+function showPhoto(url, name) {
+  const backdrop = h('div', { class: 'lightbox', onclick: () => backdrop.remove() },
+    h('img', { src: url, alt: name }),
+    h('p', {}, '点任意位置关闭'),
+  );
+  document.body.append(backdrop);
 }
 
 // --- single plant ---
@@ -312,15 +342,7 @@ function renderPlant() {
         h('button', { disabled: state.busy, onclick: () => logEntry(name) }, name));
 
   mount(
-    photoBlock(id),
-    h('div', { class: 'title-row' },
-      h('h1', {}, plantName(id)),
-      editing && h('button', { class: 'rename', onclick: onRenamePlant, 'aria-label': '改名' }, '✏️'),
-      h('button', {
-        class: editing ? 'edit-toggle on' : 'edit-toggle',
-        onclick: () => { state.editing = !state.editing; renderPlant(); },
-      }, editing ? '完成' : '✏️ 编辑'),
-    ),
+    heroBlock(id),
     h('div', { class: 'status' }, statusItems),
     editing && h('p', { class: 'muted small', style: 'margin-top:20px' }, '编辑中：点按钮不会打卡'),
     !editing && bigName && h('button', {
