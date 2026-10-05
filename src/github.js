@@ -17,8 +17,10 @@ export class GitHubStore {
     token,
     branch = 'main',
     fetchImpl = (...a) => globalThis.fetch(...a),
+    // Injectable so tests do not actually wait between retries.
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   }) {
-    Object.assign(this, { owner, repo, token, branch, fetchImpl });
+    Object.assign(this, { owner, repo, token, branch, fetchImpl, sleep });
   }
 
   #url(path) {
@@ -148,9 +150,18 @@ export class GitHubStore {
 
   // Create or overwrite. Overwriting needs the current sha, so fetch it first.
   // Last write wins: a photo has no meaningful merge, unlike the log.
-  async writeBinary(path, bytes, message) {
-    const current = await this.#get(path);
-    const res = await this.#put(path, bytesToBase64(bytes), current?.sha ?? null, message);
+  //
+  // Right after a previous upload GitHub can still report the old sha for a few
+  // seconds, so the PUT is rejected with 409/422. Wait, re-read, and retry.
+  async writeBinary(path, bytes, message, attempts = 3) {
+    const content = bytesToBase64(bytes);
+    let res;
+    for (let i = 0; i < attempts; i++) {
+      if (i > 0) await this.sleep(1000);
+      const current = await this.#get(path);
+      res = await this.#put(path, content, current?.sha ?? null, message);
+      if (res.status !== 409 && res.status !== 422) break;
+    }
     if (!res.ok) await this.#fail(res);
   }
 }

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { GitHubStore } from '../src/github.js';
 import { encodeBase64Utf8, decodeBase64Utf8, bytesToBase64 } from '../src/logic.js';
 
-function makeStore(fetchImpl) {
-  return new GitHubStore({ owner: 'pyyannie', repo: 'plants-data', token: 't', fetchImpl });
+function makeStore(fetchImpl, extra = {}) {
+  return new GitHubStore({ owner: 'pyyannie', repo: 'plants-data', token: 't', fetchImpl, ...extra });
 }
 
 const ok = (body) => ({ ok: true, status: 200, json: async () => body });
@@ -192,4 +192,43 @@ test('writeBinary creates a new photo without a sha', async () => {
   });
   await store.writeBinary('photos/a.jpg', new Uint8Array([1]), 'Photo a');
   assert.equal('sha' in putBody(put), false);
+});
+
+test('writeBinary retries with a fresh sha when GitHub still reports a stale one', async () => {
+  // Right after a photo upload, GitHub can briefly hand back the old sha; the
+  // PUT then gets 409. Re-read and try again instead of failing.
+  const shas = ['stale', 'stale', 'fresh'];
+  const putShas = [];
+  const waits = [];
+  const store = makeStore(async (url, opts) => {
+    if (opts?.method === 'PUT') {
+      const sha = putBody(opts).sha;
+      putShas.push(sha);
+      return sha === 'fresh' ? ok({}) : err(409, 'is at fresh but expected stale');
+    }
+    return ok({ content: '', sha: shas.shift() });
+  }, { sleep: async (ms) => { waits.push(ms); } });
+  await store.writeBinary('photos/a.jpg', new Uint8Array([1]), 'Photo a');
+  assert.deepEqual(putShas, ['stale', 'stale', 'fresh']);
+  assert.deepEqual(waits, [1000, 1000], 'waits between attempts');
+});
+
+test('writeBinary gives up after 3 attempts and reports the error', async () => {
+  let puts = 0;
+  const store = makeStore(async (url, opts) => {
+    if (opts?.method === 'PUT') { puts += 1; return err(409, 'sha mismatch'); }
+    return ok({ content: '', sha: 'stale' });
+  }, { sleep: async () => {} });
+  await assert.rejects(() => store.writeBinary('photos/a.jpg', new Uint8Array([1]), 'm'), /sha mismatch/);
+  assert.equal(puts, 3);
+});
+
+test('writeBinary does not retry errors that are not conflicts', async () => {
+  let puts = 0;
+  const store = makeStore(async (url, opts) => {
+    if (opts?.method === 'PUT') { puts += 1; return err(401, 'Bad credentials'); }
+    return ok({ content: '', sha: 'x' });
+  }, { sleep: async () => {} });
+  await assert.rejects(() => store.writeBinary('photos/a.jpg', new Uint8Array([1]), 'm'), /token/);
+  assert.equal(puts, 1);
 });

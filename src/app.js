@@ -30,6 +30,8 @@ const state = {
   noteDraft: '',
   // null = today. Holds a YYYY-MM-DD only while backfilling a past day.
   logDate: null,
+  // True while a photo is on its way to GitHub.
+  uploading: false,
 };
 // plant id -> object URL, or null when the plant is known to have no photo.
 const photoUrls = new Map();
@@ -179,15 +181,28 @@ async function compressPhoto(file) {
   }
 }
 
+// Reloading or closing the page mid-upload silently drops the photo, so ask first.
+function warnBeforeLeaving(e) {
+  e.preventDefault();
+  e.returnValue = '';
+}
+
 function pickPhoto(id) {
-  const input = h('input', { type: 'file', accept: 'image/*' });
+  if (state.uploading) return;
+  // Kept in the DOM until used: iOS Safari can drop a detached file input
+  // before its change event fires.
+  const input = h('input', { type: 'file', accept: 'image/*', hidden: true });
+  document.body.append(input);
   input.addEventListener('change', async () => {
+    input.remove();
     const file = input.files?.[0];
     if (!file) return;
     const previous = photoUrls.get(id) ?? null;
+    state.uploading = true;
+    window.addEventListener('beforeunload', warnBeforeLeaving);
     try {
       const blob = await compressPhoto(file);
-      // Show the local copy straight away instead of waiting for GitHub.
+      // Show the local copy straight away, under an "uploading" overlay.
       photoUrls.set(id, URL.createObjectURL(blob));
       refreshPhoto(id);
       const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -196,8 +211,11 @@ function pickPhoto(id) {
       toast('✅ 照片已保存');
     } catch (e) {
       photoUrls.set(id, previous);
+      modal('⚠️ 照片没存上', `${e.message}。照片已经退回原来那张，可以再换一次。`);
+    } finally {
+      state.uploading = false;
+      window.removeEventListener('beforeunload', warnBeforeLeaving);
       refreshPhoto(id);
-      toast(`照片没存上：${e.message}`, true);
     }
   });
   input.click();
@@ -234,7 +252,9 @@ function photoBlock(id) {
   }
   return h('div', { class: 'photo' },
     h('img', { src: url, alt: plantName(id) }),
-    state.editing && h('button', { class: 'change', onclick: () => pickPhoto(id) }, '📷 换照片'),
+    state.uploading && h('div', { class: 'uploading' }, '⏳ 照片上传中，别关页面'),
+    state.editing && !state.uploading &&
+      h('button', { class: 'change', onclick: () => pickPhoto(id) }, '📷 换照片'),
   );
 }
 
