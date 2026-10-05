@@ -100,17 +100,33 @@ function goHome() {
 // --- token setup ---
 
 function renderSetup(errorText = '') {
+  // Marked up as a standard username + password login so iOS offers to save the
+  // token in the Passwords app (encrypted, Face ID to fill) and autofills it
+  // after Safari's 7-day storage purge. The fixed username only gives the saved
+  // entry a name; it is visually hidden but must not be display:none or
+  // type=hidden, which Safari ignores.
+  const username = h('input', {
+    type: 'text',
+    name: 'username',
+    autocomplete: 'username',
+    value: 'plants',
+    class: 'visually-hidden',
+    tabindex: '-1',
+    'aria-hidden': 'true',
+  });
   const input = h('input', {
     type: 'password',
+    name: 'password',
     placeholder: 'github_pat_…',
-    autocomplete: 'off',
+    autocomplete: 'current-password',
     autocapitalize: 'off',
     spellcheck: 'false',
   });
   const error = h('div', { class: 'error', hidden: !errorText }, errorText);
-  const save = h('button', { onclick: onSave }, '保存');
+  const save = h('button', { type: 'submit' }, '保存');
 
-  async function onSave() {
+  async function onSubmit(e) {
+    e.preventDefault();
     const token = input.value.trim();
     if (!token) return;
     save.disabled = true;
@@ -120,9 +136,12 @@ function renderSetup(errorText = '') {
       // Never store a token that has not been proven to work against the data repo.
       await createStore(token).checkAccess();
       localStorage.setItem(TOKEN_KEY, token);
+      // start() replaces the form; Safari treats a submitted form disappearing
+      // as a successful login and offers to save it. A failed check leaves the
+      // form in place, so a bad token is not offered for saving.
       start();
-    } catch (e) {
-      error.textContent = e.message;
+    } catch (err) {
+      error.textContent = err.message;
       error.hidden = false;
       save.disabled = false;
       save.textContent = '保存';
@@ -131,10 +150,11 @@ function renderSetup(errorText = '') {
 
   mount(
     h('h1', {}, '🌱 植物施肥记录'),
-    h('div', { class: 'card' },
-      h('p', {}, '第一次在这台手机上打开，需要贴一下 GitHub token。'),
+    h('form', { class: 'card', method: 'post', action: '#', onsubmit: onSubmit },
+      h('p', {}, '需要贴一下 GitHub token。'),
       h('p', { class: 'muted small' },
-        'token 只存在这台手机的浏览器里。iOS 7 天没打开会自动清掉，到时候再贴一次就行，数据不会丢。'),
+        '保存后 iPhone 会问要不要存储密码，点「存储」。以后 token 被清掉（7 天没打开或清了历史记录），点输入框选「plants」、刷一下 Face ID 就能填回来，数据不会丢。'),
+      username,
       input,
       save,
       error,
