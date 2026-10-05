@@ -412,3 +412,14 @@ textarea { min-height: 72px; resize: vertical; }
   white-space: nowrap;
   border: 0;
 }
+
+/* --- deleting a whole plant --- */
+
+.delete-plant {
+  display: block;
+  width: 100%;
+  margin-top: 16px;
+  background: var(--pink);
+  border-color: rgba(255, 180, 180, 0.6);
+}
+.modal-actions .danger { background: rgba(230, 70, 70, 0.6); border-color: rgba(255, 170, 170, 0.7); }

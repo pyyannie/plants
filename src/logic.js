@@ -173,6 +173,20 @@ export function changeEntryDate(log, target, date) {
   return log.map((e, j) => (j === i ? { ...e, date } : e));
 }
 
+// Deleting a whole plant: its name and avatar crop from config, all its entries
+// from the log. The photo file is removed separately through the store.
+export function removePlant(config, id) {
+  const plants = { ...config.plants };
+  delete plants[id];
+  const avatars = { ...(config.avatars ?? {}) };
+  delete avatars[id];
+  return { ...config, plants, avatars };
+}
+
+export function removePlantEntries(log, id) {
+  return log.filter((e) => e.p !== id);
+}
+
 // One row per plant, most overdue first. Plants never fertilized sort to the
 // very top -- those are the ones most likely to have been forgotten.
 export function plantOverview(config, log, todayIso) {

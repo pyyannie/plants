@@ -4,7 +4,7 @@ import {
   todayLocal, formatShortDate, daysSince, entriesFor, lastFertEntry, lastNoteEntry,
   visibleFertilizers, addFertilizer, hideFertilizer, countFertilizerUses, renameFertilizer,
   parsePlantId, addPlant, renamePlant, addEntry, plantOverview, checkLogDate, deleteEntry,
-  avatarLayout, clampCrop, setAvatarCrop, changeEntryDate,
+  avatarLayout, clampCrop, setAvatarCrop, changeEntryDate, removePlant, removePlantEntries,
   encodeBase64Utf8, decodeBase64Utf8, bytesToBase64, base64ToBytes,
 } from '../src/logic.js';
 
@@ -293,4 +293,19 @@ test('changeEntryDate changes only one of two identical entries', () => {
 
 test('changeEntryDate explains when the entry is already gone', () => {
   assert.throws(() => changeEntryDate(LOG, { p: 'x', date: '2000-01-01' }, '2026-01-01'), /已经不在了/);
+});
+
+test('removePlant drops the name and the avatar crop without mutating the input', () => {
+  const cfg = setAvatarCrop(CONFIG, '龟背竹', { zoom: 2, x: 0.5, y: 0.5 });
+  const next = removePlant(cfg, '龟背竹');
+  assert.equal(next.plants['龟背竹'], undefined);
+  assert.equal(next.avatars['龟背竹'], undefined);
+  assert.equal(next.plants['琴叶榕'], '琴叶榕');
+  assert.equal(cfg.plants['龟背竹'], '龟背竹');
+});
+
+test('removePlantEntries drops every entry of that plant only', () => {
+  const next = removePlantEntries(LOG, '龟背竹');
+  assert.deepEqual(next.map((e) => e.p), ['琴叶榕']);
+  assert.equal(LOG.length, 4);
 });

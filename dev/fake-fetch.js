@@ -33,6 +33,17 @@ export async function fakeFetch(url, opts = {}) {
   if (!m) return json(200, { full_name: 'pyyannie/plants-data' });
   const path = decodeURIComponent(m[1]);
 
+  if (opts.method === 'DELETE') {
+    if (failWrites) return json(500, { message: '（试玩页模拟的失败）' });
+    const body = JSON.parse(opts.body);
+    if (!files.has(path)) return json(404, { message: 'Not Found' });
+    if (body.sha !== shas.get(path)) return json(409, { message: 'conflict' });
+    files.delete(path);
+    shas.delete(path);
+    console.log('commit:', body.message);
+    return json(200, {});
+  }
+
   if (opts.method !== 'PUT') {
     return files.has(path)
       ? json(200, { content: files.get(path), sha: shas.get(path) })

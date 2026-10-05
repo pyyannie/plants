@@ -3,7 +3,7 @@ import {
   todayLocal, formatShortDate, daysSince, entriesFor, lastFertEntry, lastNoteEntry,
   visibleFertilizers, addFertilizer, hideFertilizer, countFertilizerUses, renameFertilizer,
   parsePlantId, addPlant, renamePlant, addEntry, plantOverview, checkLogDate, deleteEntry,
-  avatarLayout, clampCrop, setAvatarCrop, changeEntryDate,
+  avatarLayout, clampCrop, setAvatarCrop, changeEntryDate, removePlant, removePlantEntries,
 } from './logic.js';
 
 const TOKEN_KEY = 'plants.token';
@@ -83,6 +83,24 @@ function modal(title, text) {
     ),
   );
   document.body.append(backdrop);
+}
+
+// Big two-button confirmation for destructive actions. Resolves true on confirm.
+function confirmModal(title, text, okLabel) {
+  return new Promise((resolve) => {
+    const done = (answer) => { backdrop.remove(); resolve(answer); };
+    const backdrop = h('div', { class: 'modal-backdrop' },
+      h('div', { class: 'modal', role: 'alertdialog' },
+        h('div', { class: 'modal-title' }, title),
+        h('p', {}, text),
+        h('div', { class: 'modal-actions' },
+          h('button', { onclick: () => done(false) }, '取消'),
+          h('button', { class: 'danger', onclick: () => done(true) }, okLabel),
+        ),
+      ),
+    );
+    document.body.append(backdrop);
+  });
 }
 
 function daysText(days) {
@@ -526,6 +544,7 @@ function renderPlant() {
       h('button', { onclick: goHome }, '🏠 全部植物'),
       editing && !skipToken && h('button', { onclick: clearToken }, '🔑 换 token'),
     ),
+    editing && h('button', { class: 'delete-plant', onclick: onDeletePlant }, '🗑 删除这盆植物'),
   );
   setBackdrop(photos.get(id)?.url ?? null);
   loadPhoto(id);
@@ -593,6 +612,31 @@ function historyList(id) {
       }, '🗑'),
     ),
   ));
+}
+
+// Order matters: log, then photo, then the name last. If a step fails the plant
+// is still listed, so tapping delete again finishes the job instead of leaving
+// unreachable leftovers.
+async function onDeletePlant() {
+  const id = state.plantId;
+  const name = plantName(id);
+  const count = entriesFor(state.log, id).length;
+  const hasPhoto = Boolean(photos.get(id));
+  const parts = [`${count} 条记录`, hasPhoto && '照片', state.config.avatars?.[id] && '头像设置'].filter(Boolean);
+  if (!(await confirmModal(`⚠️ 删除「${name}」？`, `会一起删掉：${parts.join('、')}。`, '删除'))) return;
+
+  const message = `Delete plant ${id}`;
+  try {
+    state.log = await store.update('log.json', [], (log) => removePlantEntries(log, id), `${message}: log entries`);
+    await store.deleteFile(`photos/${id}.jpg`, `${message}: photo`);
+    state.config = await store.update('config.json', DEFAULT_CONFIG, (cfg) => removePlant(cfg, id), `${message}: name and avatar crop`);
+  } catch (e) {
+    modal('⚠️ 没删干净', `${e.message}。这盆还留在列表里，再点一次删除就能把剩下的删掉。`);
+    renderPlant();
+    return;
+  }
+  photos.delete(id);
+  goHome();
 }
 
 async function onChangeEntryDate(entry, date) {

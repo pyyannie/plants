@@ -150,16 +150,35 @@ export class GitHubStore {
 
   // Create or overwrite. Overwriting needs the current sha, so fetch it first.
   // Last write wins: a photo has no meaningful merge, unlike the log.
-  //
-  // Right after a previous upload GitHub can still report the old sha for a few
-  // seconds, so the PUT is rejected with 409/422. Wait, re-read, and retry.
-  async writeBinary(path, bytes, message, attempts = 3) {
+  async writeBinary(path, bytes, message) {
     const content = bytesToBase64(bytes);
+    await this.#withFreshSha(path, (sha) => this.#put(path, content, sha, message));
+  }
+
+  // No-op when the file is already gone, so a half-finished delete can be re-run.
+  async deleteFile(path, message) {
+    await this.#withFreshSha(path, (sha) =>
+      sha
+        ? this.#fetch(this.#url(path), {
+            method: 'DELETE',
+            headers: { ...this.#headers(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message, sha, branch: this.branch }),
+          })
+        : null,
+    );
+  }
+
+  // Runs request(sha) with the file's current sha. Right after a previous write
+  // GitHub can still report the old sha for a few seconds, so the request is
+  // rejected with 409/422; wait, re-read, and retry. request may return null to
+  // mean "nothing to do".
+  async #withFreshSha(path, request, attempts = 3) {
     let res;
     for (let i = 0; i < attempts; i++) {
       if (i > 0) await this.sleep(1000);
       const current = await this.#get(path);
-      res = await this.#put(path, content, current?.sha ?? null, message);
+      res = await request(current?.sha ?? null);
+      if (!res) return;
       if (res.status !== 409 && res.status !== 422) break;
     }
     if (!res.ok) await this.#fail(res);

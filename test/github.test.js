@@ -74,6 +74,7 @@ test('every request header is one GitHub allows cross-origin', async () => {
   await store.update('log.json', [], (l) => l, 'msg');
   await store.readBinary('photos/a.jpg');
   await store.writeBinary('photos/a.jpg', new Uint8Array([1]), 'msg');
+  await store.deleteFile('photos/a.jpg', 'msg');
   for (const h of sent) {
     assert.ok(CORS_ALLOWED.includes(h) || CORS_SAFELISTED.includes(h), `header not allowed by CORS: ${h}`);
   }
@@ -231,4 +232,32 @@ test('writeBinary does not retry errors that are not conflicts', async () => {
   }, { sleep: async () => {} });
   await assert.rejects(() => store.writeBinary('photos/a.jpg', new Uint8Array([1]), 'm'), /token/);
   assert.equal(puts, 1);
+});
+
+test('deleteFile deletes with the current sha and skips a file that is already gone', async () => {
+  let del;
+  const store = makeStore(async (url, opts) => {
+    if (opts?.method === 'DELETE') { del = opts; return ok({}); }
+    return ok({ content: '', sha: 'p1' });
+  });
+  await store.deleteFile('photos/a.jpg', 'Delete a');
+  assert.equal(putBody(del).sha, 'p1');
+  assert.equal(putBody(del).message, 'Delete a');
+
+  let deletes = 0;
+  const gone = makeStore(async (url, opts) => {
+    if (opts?.method === 'DELETE') deletes += 1;
+    return err(404, 'Not Found');
+  });
+  await gone.deleteFile('photos/a.jpg', 'Delete a');
+  assert.equal(deletes, 0);
+});
+
+test('deleteFile retries on a stale sha like writeBinary', async () => {
+  const shas = ['stale', 'fresh'];
+  const store = makeStore(async (url, opts) => {
+    if (opts?.method === 'DELETE') return putBody(opts).sha === 'fresh' ? ok({}) : err(409, 'mismatch');
+    return ok({ content: '', sha: shas.shift() });
+  }, { sleep: async () => {} });
+  await store.deleteFile('photos/a.jpg', 'm');
 });
