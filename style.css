@@ -424,3 +424,21 @@ textarea { min-height: 72px; resize: vertical; }
   border-color: rgba(255, 180, 180, 0.6);
 }
 .modal-actions .danger { background: rgba(230, 70, 70, 0.6); border-color: rgba(255, 170, 170, 0.7); }
+
+/* --- home page mini avatars --- */
+
+.mini-avatar {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border: 1.5px solid var(--edge);
+  border-radius: 50%;
+  overflow: hidden;
+  font-size: 22px;
+}
+.mini-avatar.empty { border-style: dashed; opacity: 0.7; }
+.mini-avatar img { position: absolute; max-width: none; display: block; }

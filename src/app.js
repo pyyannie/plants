@@ -201,13 +201,14 @@ function renderLoadError(message) {
 
 const AVATAR_SIZE = 104; // keep in sync with .avatar in style.css
 
-async function compressPhoto(file) {
-  const url = URL.createObjectURL(file);
+// Re-encodes an image as JPEG, scaled by scaleFor(width, height) (never above 1).
+async function resizeImage(source, scaleFor) {
+  const url = URL.createObjectURL(source);
   try {
     const img = new Image();
     img.src = url;
     await img.decode();
-    const scale = Math.min(1, PHOTO_MAX_WIDTH / img.naturalWidth);
+    const scale = Math.min(1, scaleFor(img.naturalWidth, img.naturalHeight));
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(img.naturalWidth * scale);
     canvas.height = Math.round(img.naturalHeight * scale);
@@ -224,6 +225,15 @@ async function compressPhoto(file) {
     URL.revokeObjectURL(url);
   }
 }
+
+const compressPhoto = (file) => resizeImage(file, (w) => PHOTO_MAX_WIDTH / w);
+
+// Home-page thumbnail. Same aspect ratio as the full photo, so the saved crop
+// fractions apply unchanged. 240 px on the short side stays sharp in a 52 px
+// circle on a 3x screen even when zoomed in.
+const THUMB_SHORT_SIDE = 240;
+const makeThumb = (blob) => resizeImage(blob, (w, h) => THUMB_SHORT_SIDE / Math.min(w, h));
+const thumbPath = (id) => `photos/thumbs/${id}.jpg`;
 
 // The crop math needs the photo's pixel size, which only decoding reveals.
 async function photoFromBlob(blob) {
@@ -264,6 +274,13 @@ function pickPhoto(id) {
       if (previous) URL.revokeObjectURL(previous.url);
       saved = true;
       toast('✅ 照片已保存');
+      // The thumbnail only feeds the home page; failing it must not undo the photo.
+      try {
+        const thumb = await makeThumb(blob);
+        await store.writeBinary(thumbPath(id), new Uint8Array(await thumb.blob.arrayBuffer()), `Thumbnail ${id}`);
+      } catch (e) {
+        toast(`首页小头像没存上：${e.message}`, true);
+      }
     } catch (e) {
       photos.set(id, previous);
       modal('⚠️ 照片没存上', `${e.message}。照片已经退回原来那张，可以再换一次。`);
@@ -630,6 +647,7 @@ async function onDeletePlant() {
   try {
     state.log = await store.update('log.json', [], (log) => removePlantEntries(log, id), `${message}: log entries`);
     await store.deleteFile(`photos/${id}.jpg`, `${message}: photo`);
+    await store.deleteFile(thumbPath(id), `${message}: thumbnail`);
     state.config = await store.update('config.json', DEFAULT_CONFIG, (cfg) => removePlant(cfg, id), `${message}: name and avatar crop`);
   } catch (e) {
     modal('⚠️ 没删干净', `${e.message}。这盆还留在列表里，再点一次删除就能把剩下的删掉。`);
@@ -837,8 +855,35 @@ function renderRegister() {
 
 // --- home overview ---
 
+const MINI_AVATAR_SIZE = 52; // keep in sync with .mini-avatar in style.css
+
+// Fills in each row's small avatar once its thumbnail arrives. One folder
+// listing tells which plants have a thumbnail, so plants without one cost nothing.
+async function loadThumbs(ids, slots) {
+  let names;
+  try {
+    names = new Set(await store.listDir('photos/thumbs'));
+  } catch {
+    return; // Avatars are decoration; the list works without them.
+  }
+  await Promise.all(ids.filter((id) => names.has(`${id}.jpg`)).map(async (id) => {
+    try {
+      const file = await store.readBinary(thumbPath(id));
+      if (!file) return;
+      const photo = await photoFromBlob(new Blob([file.bytes], { type: 'image/jpeg' }));
+      slots.get(id).replaceChildren(
+        h('img', { src: photo.url, alt: '', style: cropStyle(photo, MINI_AVATAR_SIZE, state.config.avatars?.[id]) }),
+      );
+      slots.get(id).classList.remove('empty');
+    } catch {
+      // Leave the placeholder for this one plant.
+    }
+  }));
+}
+
 function renderHome() {
   const rows = plantOverview(state.config, state.log, todayLocal());
+  const miniAvatars = new Map(rows.map((r) => [r.id, h('span', { class: 'mini-avatar empty' }, '🪴')]));
   const tagUrl = `${location.origin}${location.pathname}?p=植物名`;
   mount(
     h('h1', {}, '🌱 全部植物'),
@@ -853,6 +898,7 @@ function renderHome() {
       class: r.days === null ? 'plant-row never' : 'plant-row',
       onclick: () => { location.search = `?p=${encodeURIComponent(r.id)}`; },
     },
+      miniAvatars.get(r.id),
       h('span', { class: 'name' }, r.name),
       h('span', { class: 'when' },
         r.days === null ? '还没记过' : [daysText(r.days), h('br'), r.lastFert]),
@@ -860,6 +906,7 @@ function renderHome() {
     !skipToken && h('div', { class: 'footer-actions' },
       h('button', { onclick: clearToken }, '🔑 换 token')),
   );
+  loadThumbs(rows.map((r) => r.id), miniAvatars);
 }
 
 // --- boot ---

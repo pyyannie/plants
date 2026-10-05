@@ -261,3 +261,16 @@ test('deleteFile retries on a stale sha like writeBinary', async () => {
   }, { sleep: async () => {} });
   await store.deleteFile('photos/a.jpg', 'm');
 });
+
+test('listDir returns file names, or an empty list when the folder does not exist', async () => {
+  let seen;
+  const store = makeStore(async (url) => {
+    seen = url;
+    return ok([{ name: 'a.jpg', type: 'file' }, { name: 'sub', type: 'dir' }, { name: '龟背竹.jpg', type: 'file' }]);
+  });
+  assert.deepEqual(await store.listDir('photos/thumbs'), ['a.jpg', '龟背竹.jpg']);
+  assert.match(seen, /contents\/photos\/thumbs\?ref=main/);
+
+  const missing = makeStore(async () => err(404, 'Not Found'));
+  assert.deepEqual(await missing.listDir('photos/thumbs'), []);
+});

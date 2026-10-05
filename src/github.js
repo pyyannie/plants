@@ -140,6 +140,13 @@ export class GitHubStore {
     return data;
   }
 
+  // File names in a folder; [] when the folder does not exist yet. Lets the home
+  // page learn which plants have thumbnails in one request instead of one each.
+  async listDir(path) {
+    const body = await this.#get(path);
+    return Array.isArray(body) ? body.filter((e) => e.type === 'file').map((e) => e.name) : [];
+  }
+
   // Returns { bytes, sha } or null when the file does not exist.
   // The Contents API inlines files up to 1 MB; compressed photos are ~100 KB.
   async readBinary(path) {

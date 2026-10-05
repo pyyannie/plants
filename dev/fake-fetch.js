@@ -45,6 +45,12 @@ export async function fakeFetch(url, opts = {}) {
   }
 
   if (opts.method !== 'PUT') {
+    // A folder path lists the files directly inside it, like the real API.
+    const prefix = `${path}/`;
+    const children = [...files.keys()].filter((k) => k.startsWith(prefix) && !k.slice(prefix.length).includes('/'));
+    if (!files.has(path) && children.length) {
+      return json(200, children.map((k) => ({ name: k.slice(prefix.length), type: 'file' })));
+    }
     return files.has(path)
       ? json(200, { content: files.get(path), sha: shas.get(path) })
       : json(404, { message: 'Not Found' });
