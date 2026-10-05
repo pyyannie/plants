@@ -3,6 +3,7 @@ import {
   todayLocal, formatShortDate, daysSince, entriesFor, lastFertEntry, lastNoteEntry,
   visibleFertilizers, addFertilizer, hideFertilizer, countFertilizerUses, renameFertilizer,
   parsePlantId, addPlant, renamePlant, addEntry, plantOverview, checkLogDate, deleteEntry,
+  avatarLayout, clampCrop, setAvatarCrop,
 } from './logic.js';
 
 const TOKEN_KEY = 'plants.token';
@@ -33,8 +34,8 @@ const state = {
   // True while a photo is on its way to GitHub.
   uploading: false,
 };
-// plant id -> object URL, or null when the plant is known to have no photo.
-const photoUrls = new Map();
+// plant id -> { url, w, h }, or null when the plant is known to have no photo.
+const photos = new Map();
 
 // Tiny element builder: h('button', { class: 'x', onclick }, 'text', child, ...).
 // Children that are null/false are skipped, which keeps conditional markup terse.
@@ -58,6 +59,8 @@ export function h(tag, props = {}, ...children) {
 // so views can pass `cond && el` and mapped lists straight in.
 function mount(...nodes) {
   app.replaceChildren(...nodes.flat().filter((n) => n != null && n !== false));
+  // Plain gradient by default; renderPlant() swaps in the plant's photo.
+  setBackdrop(null);
 }
 
 let toastTimer;
@@ -158,6 +161,8 @@ function renderLoadError(message) {
 
 // --- photo ---
 
+const AVATAR_SIZE = 104; // keep in sync with .avatar in style.css
+
 async function compressPhoto(file) {
   const url = URL.createObjectURL(file);
   try {
@@ -169,16 +174,26 @@ async function compressPhoto(file) {
     canvas.width = Math.round(img.naturalWidth * scale);
     canvas.height = Math.round(img.naturalHeight * scale);
     canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-    return await new Promise((resolve, reject) =>
+    const blob = await new Promise((resolve, reject) =>
       canvas.toBlob(
-        (blob) => (blob ? resolve(blob) : reject(new Error('照片压缩失败'))),
+        (b) => (b ? resolve(b) : reject(new Error('照片压缩失败'))),
         'image/jpeg',
         PHOTO_QUALITY,
       ),
     );
+    return { blob, w: canvas.width, h: canvas.height };
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+// The crop math needs the photo's pixel size, which only decoding reveals.
+async function photoFromBlob(blob) {
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.src = url;
+  await img.decode();
+  return { url, w: img.naturalWidth, h: img.naturalHeight };
 }
 
 // Reloading or closing the page mid-upload silently drops the photo, so ask first.
@@ -197,38 +212,47 @@ function pickPhoto(id) {
     input.remove();
     const file = input.files?.[0];
     if (!file) return;
-    const previous = photoUrls.get(id) ?? null;
+    const previous = photos.get(id) ?? null;
+    let saved = false;
     state.uploading = true;
     window.addEventListener('beforeunload', warnBeforeLeaving);
     try {
-      const blob = await compressPhoto(file);
+      const { blob, w, h: height } = await compressPhoto(file);
       // Show the local copy straight away, under an "uploading" overlay.
-      photoUrls.set(id, URL.createObjectURL(blob));
+      photos.set(id, { url: URL.createObjectURL(blob), w, h: height });
       refreshPhoto(id);
       const bytes = new Uint8Array(await blob.arrayBuffer());
       await store.writeBinary(`photos/${id}.jpg`, bytes, `Photo ${id}`);
-      if (previous) URL.revokeObjectURL(previous);
+      if (previous) URL.revokeObjectURL(previous.url);
+      saved = true;
       toast('✅ 照片已保存');
     } catch (e) {
-      photoUrls.set(id, previous);
+      photos.set(id, previous);
       modal('⚠️ 照片没存上', `${e.message}。照片已经退回原来那张，可以再换一次。`);
     } finally {
       state.uploading = false;
       window.removeEventListener('beforeunload', warnBeforeLeaving);
       refreshPhoto(id);
     }
+    if (!saved) return;
+    // The old crop was framed for the old photo; drop it, then let the user frame the new one.
+    if (state.config.avatars?.[id]) {
+      await saveConfig((cfg) => setAvatarCrop(cfg, id, null), `Reset avatar crop ${id}`);
+      refreshPhoto(id);
+    }
+    openCropper(id);
   });
   input.click();
 }
 
 async function loadPhoto(id) {
-  if (photoUrls.has(id)) return;
+  if (photos.has(id)) return;
   try {
     const file = await store.readBinary(`photos/${id}.jpg`);
-    photoUrls.set(id, file ? URL.createObjectURL(new Blob([file.bytes], { type: 'image/jpeg' })) : null);
+    photos.set(id, file ? await photoFromBlob(new Blob([file.bytes], { type: 'image/jpeg' })) : null);
   } catch {
     // A failed photo read should not block logging; show the empty slot.
-    photoUrls.set(id, null);
+    photos.set(id, null);
   }
   refreshPhoto(id);
 }
@@ -237,37 +261,61 @@ async function loadPhoto(id) {
 function refreshPhoto(id) {
   if (state.plantId !== id) return;
   document.querySelector('.hero')?.replaceWith(heroBlock(id));
+  setBackdrop(photos.get(id)?.url ?? null);
+}
+
+// The page background is a blurred copy of the plant's photo, or a green
+// gradient when there is none. It sits outside #app so mount() leaves it alone.
+function setBackdrop(url) {
+  let el = document.querySelector('.backdrop');
+  if (!el) {
+    el = h('div', { class: 'backdrop' });
+    document.body.prepend(el);
+  }
+  el.style.backgroundImage = url ? `url("${url}")` : '';
+  el.classList.toggle('plain', !url);
+}
+
+function cropStyle(photo, size, crop, offset = 0) {
+  const l = avatarLayout(photo.w, photo.h, size, crop);
+  return `width:${l.width}px;height:${l.height}px;left:${offset + l.left}px;top:${offset + l.top}px`;
 }
 
 // Round avatar beside the name: a small circle hides how near or far each photo
-// was taken, so 30+ plants look consistent. Tap it for the full photo.
+// was taken, so 30+ plants look consistent. Tap it for the full photo, or in
+// edit mode to re-frame it.
 function heroBlock(id) {
   const { editing, uploading } = state;
   const name = plantName(id);
-  const url = photoUrls.get(id);
+  const photo = photos.get(id);
   let avatar;
-  if (!photoUrls.has(id)) {
+  if (!photos.has(id)) {
     avatar = h('div', { class: 'avatar empty' }, '…');
-  } else if (!url) {
+  } else if (!photo) {
     avatar = h('button', { class: 'avatar empty', onclick: () => pickPhoto(id), 'aria-label': '加照片' },
       h('span', { class: 'icon' }, '📷'),
       '加照片',
     );
   } else {
-    avatar = h('button', { class: 'avatar', onclick: () => showPhoto(url, name), 'aria-label': '看大图' },
-      h('img', { src: url, alt: name }),
+    avatar = h('button', {
+      class: 'avatar',
+      onclick: () => (editing && !uploading ? openCropper(id) : showPhoto(photo.url, name)),
+      'aria-label': editing ? '调整头像' : '看大图',
+    },
+      h('img', { src: photo.url, alt: name, style: cropStyle(photo, AVATAR_SIZE, state.config.avatars?.[id]) }),
       uploading && h('span', { class: 'uploading' }, '⏳'),
     );
   }
   return h('div', { class: 'hero' },
     h('div', { class: 'avatar-wrap' },
       avatar,
-      editing && url && !uploading &&
+      editing && photo && !uploading &&
         h('button', { class: 'change', onclick: () => pickPhoto(id), 'aria-label': '换照片' }, '📷'),
     ),
     h('div', { class: 'hero-right' },
       h('h1', {}, name),
       uploading && h('p', { class: 'uploading-note' }, '⏳ 照片上传中，别关页面'),
+      editing && photo && !uploading && h('p', { class: 'uploading-note' }, '点头像调整大小和位置'),
       h('div', { class: 'hero-actions' },
         editing && h('button', { class: 'rename', onclick: onRenamePlant, 'aria-label': '改名' }, '✏️ 改名'),
         h('button', {
@@ -286,6 +334,100 @@ function showPhoto(url, name) {
     h('p', {}, '点任意位置关闭'),
   );
   document.body.append(backdrop);
+}
+
+// Pinch to zoom, drag to move, or use the slider. Only { zoom, x, y } is saved
+// to config.json; the photo itself is never cropped.
+function openCropper(id) {
+  const photo = photos.get(id);
+  if (!photo) return;
+  const size = Math.min(260, window.innerWidth - 110);
+  const pad = 24;
+  let crop = clampCrop(photo.w, photo.h, state.config.avatars?.[id]);
+
+  const img = h('img', { src: photo.url, alt: '' });
+  const slider = h('input', {
+    type: 'range', min: 1, max: 4, step: 0.01, value: crop.zoom, 'aria-label': '缩放',
+    oninput: () => {
+      crop = clampCrop(photo.w, photo.h, { ...crop, zoom: Number(slider.value) });
+      place();
+    },
+  });
+  function place() {
+    img.setAttribute('style', cropStyle(photo, size, crop, pad));
+    slider.value = crop.zoom;
+  }
+
+  const stage = h('div', { class: 'crop-stage', style: `width:${size + pad * 2}px;height:${size + pad * 2}px` },
+    img,
+    h('div', { class: 'crop-ring', style: `left:${pad}px;top:${pad}px;width:${size}px;height:${size}px` }),
+  );
+  const pointers = new Map();
+  let lastDist = null;
+  stage.addEventListener('pointerdown', (e) => {
+    stage.setPointerCapture?.(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    lastDist = null;
+  });
+  stage.addEventListener('pointermove', (e) => {
+    const prev = pointers.get(e.pointerId);
+    if (!prev) return;
+    const cur = { x: e.clientX, y: e.clientY };
+    pointers.set(e.pointerId, cur);
+    if (pointers.size === 1) {
+      // Dragging moves the photo, so the circle's center moves the opposite way.
+      const { width, height } = avatarLayout(photo.w, photo.h, size, crop);
+      crop = clampCrop(photo.w, photo.h, {
+        ...crop,
+        x: crop.x - (cur.x - prev.x) / width,
+        y: crop.y - (cur.y - prev.y) / height,
+      });
+    } else if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      if (lastDist) crop = clampCrop(photo.w, photo.h, { ...crop, zoom: crop.zoom * (dist / lastDist) });
+      lastDist = dist;
+    }
+    place();
+  });
+  const release = (e) => {
+    pointers.delete(e.pointerId);
+    lastDist = null;
+  };
+  stage.addEventListener('pointerup', release);
+  stage.addEventListener('pointercancel', release);
+
+  const close = () => backdrop.remove();
+  const save = h('button', {
+    class: 'primary',
+    onclick: async () => {
+      save.disabled = true;
+      save.textContent = '保存中…';
+      if (await saveConfig((cfg) => setAvatarCrop(cfg, id, crop), `Crop avatar ${id}`)) {
+        close();
+        toast('✅ 头像已调整');
+        refreshPhoto(id);
+        return;
+      }
+      save.disabled = false;
+      save.textContent = '保存';
+    },
+  }, '保存');
+
+  const backdrop = h('div', { class: 'modal-backdrop' },
+    h('div', { class: 'modal cropper', role: 'dialog' },
+      h('div', { class: 'modal-title' }, '调整头像'),
+      h('p', {}, '双指捏合放大缩小，单指拖动挪位置'),
+      stage,
+      h('label', { class: 'zoom-row' }, '🔍', slider),
+      h('div', { class: 'modal-actions' },
+        h('button', { onclick: close }, '取消'),
+        save,
+      ),
+    ),
+  );
+  document.body.append(backdrop);
+  place();
 }
 
 // --- single plant ---
@@ -364,6 +506,7 @@ function renderPlant() {
       editing && !skipToken && h('button', { onclick: clearToken }, '🔑 换 token'),
     ),
   );
+  setBackdrop(photos.get(id)?.url ?? null);
   loadPhoto(id);
 }
 

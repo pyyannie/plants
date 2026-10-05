@@ -4,6 +4,7 @@ import {
   todayLocal, formatShortDate, daysSince, entriesFor, lastFertEntry, lastNoteEntry,
   visibleFertilizers, addFertilizer, hideFertilizer, countFertilizerUses, renameFertilizer,
   parsePlantId, addPlant, renamePlant, addEntry, plantOverview, checkLogDate, deleteEntry,
+  avatarLayout, clampCrop, setAvatarCrop,
   encodeBase64Utf8, decodeBase64Utf8, bytesToBase64, base64ToBytes,
 } from '../src/logic.js';
 
@@ -232,4 +233,45 @@ test('deleteEntry removes only one of two identical entries', () => {
 
 test('deleteEntry explains when the entry is already gone', () => {
   assert.throws(() => deleteEntry(LOG, { p: '龟背竹', date: '2000-01-01', fert: 'x' }), /已经不在了/);
+});
+
+// --- avatar crop ---
+
+test('avatarLayout with no crop fills the circle and centers the photo', () => {
+  // Portrait 800x1000 into a 100px circle: short side fits exactly.
+  const l = avatarLayout(800, 1000, 100, null);
+  assert.equal(l.width, 100);
+  assert.equal(l.height, 125);
+  assert.equal(l.left, 0);
+  assert.equal(l.top, -12.5);
+});
+
+test('avatarLayout zooms around the chosen center', () => {
+  const l = avatarLayout(800, 800, 100, { zoom: 2, x: 0.25, y: 0.75 });
+  assert.equal(l.width, 200);
+  assert.equal(l.left, 0, 'x=0.25 at zoom 2 puts the left edge at the circle edge');
+  assert.equal(l.top, -100);
+});
+
+test('avatarLayout never leaves a gap inside the circle', () => {
+  const l = avatarLayout(800, 800, 100, { zoom: 2, x: 0, y: 1 });
+  assert.equal(l.left, 0);
+  assert.equal(l.top, -100);
+});
+
+test('clampCrop keeps zoom in 1-4 and the center where the circle stays covered', () => {
+  assert.deepEqual(clampCrop(800, 800, { zoom: 9, x: 0.5, y: 0.5 }), { zoom: 4, x: 0.5, y: 0.5 });
+  assert.deepEqual(clampCrop(800, 800, { zoom: 0.2, x: 0.9, y: 0.1 }), { zoom: 1, x: 0.5, y: 0.5 });
+  // Zoom 2 on a square: the visible half can slide between 0.25 and 0.75.
+  assert.deepEqual(clampCrop(800, 800, { zoom: 2, x: 0, y: 1 }), { zoom: 2, x: 0.25, y: 0.75 });
+});
+
+test('setAvatarCrop stores a crop per plant and null removes it', () => {
+  const withCrop = setAvatarCrop(CONFIG, '龟背竹', { zoom: 1.5, x: 0.4, y: 0.6 });
+  assert.deepEqual(withCrop.avatars['龟背竹'], { zoom: 1.5, x: 0.4, y: 0.6 });
+  assert.equal(CONFIG.avatars, undefined, 'original config must not be mutated');
+  const rounded = setAvatarCrop(CONFIG, '龟背竹', { zoom: 3.3333333333, x: 0.42307692, y: 0.5615384 });
+  assert.deepEqual(rounded.avatars['龟背竹'], { zoom: 3.3333, x: 0.4231, y: 0.5615 });
+  const cleared = setAvatarCrop(withCrop, '龟背竹', null);
+  assert.equal(cleared.avatars['龟背竹'], undefined);
 });

@@ -1,40 +1,51 @@
-/* Warm paper background, thick black outlines, hard offset shadows. */
+/* Liquid glass: frosted translucent panels over a blurred copy of the plant's
+   own photo (or a green gradient when there is none). Depth comes from a top
+   highlight and a soft shadow rather than hard outlines. Always dark, so white
+   text stays readable over any photo. */
 
 :root {
-  --bg: #f6f0e4;
-  --card: #fffdf8;
-  --ink: #1d1b16;
-  --muted: #6f6858;
-  --line: 2.5px solid var(--ink);
-  --shadow: 4px 4px 0 var(--ink);
-  --green: #b8e0a6;
-  --green-strong: #8fcf75;
-  --yellow: #ffe28a;
-  --pink: #ffc9c0;
-  --radius: 14px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1d1b18;
-    --card: #2a2722;
-    --ink: #f3ecdc;
-    --muted: #b3aa96;
-    --green: #3f6b33;
-    --green-strong: #4f8a40;
-    --yellow: #6e5c1f;
-    --pink: #6e3a33;
-  }
+  color-scheme: dark;
+  --text: #fff;
+  --muted: rgba(255, 255, 255, 0.7);
+  --glass: rgba(255, 255, 255, 0.16);
+  --glass-hover: rgba(255, 255, 255, 0.24);
+  --edge: rgba(255, 255, 255, 0.42);
+  --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  --blur: blur(22px) saturate(180%);
+  --green: rgba(140, 220, 120, 0.38);
+  --green-edge: rgba(200, 255, 190, 0.6);
+  --yellow: rgba(255, 220, 120, 0.35);
+  --pink: rgba(255, 140, 140, 0.4);
+  --radius: 22px;
 }
 
 * { box-sizing: border-box; }
 
 html, body {
   margin: 0;
-  background: var(--bg);
-  color: var(--ink);
+  min-height: 100%;
+  background: #14231a;
+  color: var(--text);
   font: 17px/1.45 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
   -webkit-text-size-adjust: 100%;
+}
+
+/* Blurred page background. Fixed and oversized so the blur has no hard edges. */
+.backdrop {
+  position: fixed;
+  inset: -60px;
+  z-index: -1;
+  background-size: cover;
+  background-position: center;
+  filter: blur(28px) saturate(1.4) brightness(0.72);
+}
+.backdrop.plain {
+  filter: none;
+  background:
+    radial-gradient(circle at 20% 15%, #7fb77e, transparent 55%),
+    radial-gradient(circle at 85% 70%, #3e7c6b, transparent 60%),
+    linear-gradient(160deg, #24452f, #0f2219);
 }
 
 #app {
@@ -48,30 +59,37 @@ h2 { font-size: 15px; margin: 28px 0 10px; color: var(--muted); font-weight: 600
 
 button, input, textarea { font: inherit; color: inherit; }
 
+/* Shared glass surface. */
+button, .card, .status, .plant-row, .date-row, .modal {
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  box-shadow: var(--highlight), var(--shadow);
+}
+
 button {
   min-height: 48px;
   padding: 10px 14px;
-  background: var(--card);
-  border: var(--line);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
   font-weight: 600;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: transform 0.06s, box-shadow 0.06s;
+  transition: transform 0.08s, background 0.15s;
 }
-button:active:not(:disabled) { transform: translate(3px, 3px); box-shadow: 1px 1px 0 var(--ink); }
+button:active:not(:disabled) { transform: scale(0.97); background: var(--glass-hover); }
 button:disabled { opacity: 0.45; cursor: default; }
 
 input, textarea {
   width: 100%;
   padding: 12px 14px;
-  background: var(--card);
-  border: var(--line);
-  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--edge);
+  border-radius: 18px;
   outline: none;
 }
-input:focus, textarea:focus { box-shadow: var(--shadow); }
+input::placeholder, textarea::placeholder { color: rgba(255, 255, 255, 0.5); }
+input:focus, textarea:focus { border-color: #fff; }
 textarea { min-height: 72px; resize: vertical; }
 
 .muted { color: var(--muted); }
@@ -91,16 +109,16 @@ textarea { min-height: 72px; resize: vertical; }
   height: 104px;
   min-height: 0;
   padding: 0;
-  border: var(--line);
+  border: 2px solid var(--edge);
   border-radius: 50%;
-  box-shadow: var(--shadow);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.6);
   overflow: hidden;
-  background: var(--card);
   color: var(--muted);
   font-size: 14px;
   font-weight: 600;
 }
-.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Size and offset come from avatarLayout() as inline styles. */
+.avatar img { position: absolute; max-width: none; display: block; }
 .avatar.empty { border-style: dashed; box-shadow: none; }
 .avatar.empty .icon { font-size: 28px; line-height: 1.1; }
 .avatar .uploading {
@@ -120,56 +138,28 @@ textarea { min-height: 72px; resize: vertical; }
   height: 40px;
   min-height: 0;
   padding: 0;
-  border-width: 2px;
   border-radius: 50%;
-  box-shadow: none;
   background: var(--yellow);
   font-size: 18px;
 }
 .hero-right { flex: 1; min-width: 0; }
 .hero-right h1 { font-size: 24px; }
 .hero-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.hero-actions .rename { min-height: 40px; padding: 6px 12px; font-size: 15px; }
-.uploading-note { margin: 6px 0 0; font-size: 14px; font-weight: 600; color: var(--muted); }
-
-.lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 20px;
-  background: rgba(0, 0, 0, 0.88);
-}
-.lightbox img { max-width: 100%; max-height: 85vh; border-radius: var(--radius); }
-.lightbox p { margin: 0; color: #ccc; font-size: 14px; }
-
-/* --- title --- */
-
-.edit-toggle { min-height: 40px; padding: 6px 12px; font-size: 15px; }
+.hero-actions .rename,
+.edit-toggle { min-height: 40px; padding: 6px 14px; font-size: 15px; border-radius: 999px; }
 .edit-toggle.on { background: var(--yellow); }
+.uploading-note { margin: 6px 0 0; font-size: 14px; font-weight: 600; color: var(--muted); }
 
 /* --- last fertilizing / last note --- */
 
-.status {
-  margin-top: 16px;
-  background: var(--card);
-  border: var(--line);
-  border-radius: var(--radius);
-  padding: 4px 16px;
-}
+.status { margin-top: 18px; padding: 4px 18px; }
 .status-item { padding: 12px 0; }
-.status-item + .status-item { border-top: 1.5px dashed var(--muted); }
+.status-item + .status-item { border-top: 1px solid rgba(255, 255, 255, 0.2); }
 .status-label { font-size: 14px; color: var(--muted); font-weight: 600; }
 .status-value { font-size: 19px; font-weight: 700; margin-top: 2px; word-break: break-word; }
 .status-note { font-size: 17px; margin-top: 4px; word-break: break-word; white-space: pre-wrap; }
 
 /* --- logging --- */
-
-.note-label { display: block; margin: 22px 0 8px; font-size: 15px; font-weight: 600; color: var(--muted); }
 
 .repeat {
   display: block;
@@ -177,7 +167,8 @@ textarea { min-height: 72px; resize: vertical; }
   min-height: 64px;
   margin-top: 16px;
   font-size: 21px;
-  background: var(--green-strong);
+  background: var(--green);
+  border-color: var(--green-edge);
 }
 
 .grid {
@@ -186,14 +177,18 @@ textarea { min-height: 72px; resize: vertical; }
   gap: 12px;
   margin-top: 14px;
 }
-.grid button { position: relative; background: var(--green); word-break: break-all; }
+.grid button { position: relative; word-break: break-all; }
 .grid .add {
   background: transparent;
-  border-style: dashed;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border: 1.5px dashed var(--edge);
   box-shadow: none;
   font-size: 24px;
   font-weight: 400;
 }
+.grid .cell { position: relative; display: flex; }
+.grid .cell > button:first-child { flex: 1; }
 .grid .corner {
   position: absolute;
   top: -12px;
@@ -201,33 +196,67 @@ textarea { min-height: 72px; resize: vertical; }
   width: 30px;
   height: 30px;
   padding: 0;
-  border-width: 2px;
   border-radius: 50%;
-  box-shadow: none;
   font-size: 14px;
   line-height: 1;
 }
 .grid .corner.rename-f { left: -8px; background: var(--yellow); }
 .grid .corner.hide-f { right: -8px; background: var(--pink); }
 
+.note-label { display: block; margin: 22px 0 8px; font-size: 15px; font-weight: 600; color: var(--muted); }
 /* Note box sits under the fertilizer grid with a small OK (note-only save) beside it. */
 .note-row { display: flex; gap: 10px; align-items: stretch; }
 .note-row textarea { flex: 1; min-width: 0; }
 .note-row .note-ok { flex: 0 0 64px; padding: 0; background: var(--yellow); }
+
+/* --- backfill date row --- */
+
+.date-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 18px;
+  font-weight: 600;
+}
+.date-row.past { background: var(--yellow); }
+.date-row .chevron { color: var(--muted); }
+/* Invisible native input covering the row: tapping opens the iOS date wheel. */
+.date-row .date-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  border: 0;
+  padding: 0;
+}
 
 /* --- history --- */
 
 .history { list-style: none; margin: 0; padding: 0; }
 .history li {
   display: flex;
+  align-items: center;
   gap: 12px;
   padding: 10px 0;
-  border-bottom: 1.5px dashed color-mix(in srgb, var(--muted) 50%, transparent);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
 }
 .history .date { flex: 0 0 48px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .history .what { flex: 1; word-break: break-word; }
 .history .fert { font-weight: 600; }
 .history .note { display: block; color: var(--muted); white-space: pre-wrap; }
+.history .del {
+  flex: none;
+  min-height: 40px;
+  width: 44px;
+  padding: 0;
+  border-radius: 14px;
+  background: var(--pink);
+}
 
 /* --- home overview --- */
 
@@ -245,22 +274,15 @@ textarea { min-height: 72px; resize: vertical; }
 
 /* --- setup / cards / messages --- */
 
-.card {
-  background: var(--card);
-  border: var(--line);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 20px;
-  margin-top: 18px;
-}
+.card { padding: 20px; margin-top: 18px; }
 .card p { margin: 0 0 14px; }
-.card button { width: 100%; margin-top: 14px; background: var(--green-strong); }
+.card button { width: 100%; margin-top: 14px; background: var(--green); border-color: var(--green-edge); }
 
 .error {
   margin-top: 14px;
   padding: 10px 14px;
-  border: var(--line);
-  border-radius: var(--radius);
+  border: 1px solid var(--edge);
+  border-radius: 18px;
   background: var(--pink);
   font-size: 15px;
   word-break: break-word;
@@ -272,73 +294,27 @@ textarea { min-height: 72px; resize: vertical; }
   bottom: calc(24px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   padding: 12px 20px;
-  background: var(--ink);
-  color: var(--bg);
+  background: rgba(20, 30, 22, 0.75);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  border: 1px solid var(--edge);
   border-radius: 999px;
   font-weight: 600;
   z-index: 10;
   white-space: nowrap;
 }
-
-.footer-actions { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; }
-.footer-actions button { flex: 1; font-size: 15px; min-height: 44px; }
-
-/* --- edit-mode cells and error toast --- */
-
-.grid .cell { position: relative; display: flex; }
-.grid .cell > button:first-child { flex: 1; }
 .toast.error {
   white-space: normal;
   width: max-content;
   max-width: 90vw;
-  background: var(--pink);
-  color: var(--ink);
-  border: var(--line);
-  border-radius: var(--radius);
+  border-radius: 18px;
+  background: rgba(120, 40, 40, 0.8);
 }
 
-/* --- backfill date row --- */
+.footer-actions { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; }
+.footer-actions button { flex: 1; font-size: 15px; min-height: 44px; }
 
-.date-row {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 48px;
-  margin-top: 12px;
-  padding: 10px 14px;
-  border: var(--line);
-  border-radius: var(--radius);
-  background: var(--card);
-  font-weight: 600;
-}
-.date-row.past { background: var(--yellow); }
-.date-row .chevron { color: var(--muted); }
-/* Invisible native input covering the row: tapping opens the iOS date wheel. */
-.date-row .date-input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  border: 0;
-  padding: 0;
-}
-
-/* --- delete button in history (edit mode) --- */
-
-.history li { align-items: center; }
-.history .del {
-  flex: none;
-  min-height: 40px;
-  width: 44px;
-  padding: 0;
-  background: var(--pink);
-  box-shadow: none;
-  border-width: 2px;
-}
-
-/* --- big blocking notice --- */
+/* --- big blocking notice and avatar cropper --- */
 
 .modal-backdrop {
   position: fixed;
@@ -347,19 +323,56 @@ textarea { min-height: 72px; resize: vertical; }
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
-  background: rgba(0, 0, 0, 0.45);
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.5);
 }
 .modal {
   width: 100%;
   max-width: 400px;
   padding: 24px;
-  background: var(--card);
-  border: var(--line);
-  border-radius: var(--radius);
-  box-shadow: 6px 6px 0 var(--ink);
+  background: rgba(40, 52, 44, 0.72);
 }
 .modal-title { font-size: 24px; font-weight: 800; }
 .modal p { font-size: 18px; margin: 12px 0 18px; }
-.modal button { width: 100%; background: var(--pink); }
+.modal > button { width: 100%; background: var(--pink); }
+.modal-actions { display: flex; gap: 12px; margin-top: 18px; }
+.modal-actions button { flex: 1; }
+.modal-actions .primary { background: var(--green); border-color: var(--green-edge); }
 
+.cropper { text-align: center; }
+.cropper p { font-size: 14px; color: var(--muted); margin: 6px 0 14px; }
+.crop-stage {
+  position: relative;
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: 18px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.crop-stage img { position: absolute; max-width: none; pointer-events: none; }
+/* Darkens everything outside the circle. */
+.crop-ring {
+  position: absolute;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+.zoom-row { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+.zoom-row input { flex: 1; padding: 0; border: 0; background: none; accent-color: #9be38a; }
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.88);
+}
+.lightbox img { max-width: 100%; max-height: 85vh; border-radius: var(--radius); }
+.lightbox p { margin: 0; color: #ccc; font-size: 14px; }

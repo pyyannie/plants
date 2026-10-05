@@ -217,3 +217,45 @@ export function encodeBase64Utf8(str) {
 export function decodeBase64Utf8(b64) {
   return new TextDecoder().decode(base64ToBytes(b64));
 }
+
+// --- avatar crop ---
+// A crop is { zoom, x, y }: zoom 1 means the short side of the photo just fills
+// the circle; x/y are the circle's center as a fraction of the photo's width and
+// height. Only these numbers are stored, never a cropped copy, so the full photo
+// stays available and the avatar can be re-adjusted any time.
+
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 4;
+const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+
+// Keeps zoom in range and the center far enough from the edges that the circle
+// is always fully covered by the photo. Independent of the circle's pixel size.
+export function clampCrop(w, h, crop) {
+  const zoom = clamp(crop?.zoom ?? 1, MIN_ZOOM, MAX_ZOOM);
+  const short = Math.min(w, h);
+  const halfX = short / (w * zoom) / 2;
+  const halfY = short / (h * zoom) / 2;
+  return {
+    zoom,
+    x: clamp(crop?.x ?? 0.5, halfX, 1 - halfX),
+    y: clamp(crop?.y ?? 0.5, halfY, 1 - halfY),
+  };
+}
+
+// Pixel size and offset for a w x h photo inside a circle of `size` px.
+export function avatarLayout(w, h, size, crop) {
+  const { zoom, x, y } = clampCrop(w, h, crop);
+  const scale = (size / Math.min(w, h)) * zoom;
+  const width = w * scale;
+  const height = h * scale;
+  return { width, height, left: size / 2 - x * width, top: size / 2 - y * height };
+}
+
+export function setAvatarCrop(config, id, crop) {
+  const avatars = { ...(config.avatars ?? {}) };
+  // Four decimals is far finer than a pixel and keeps config.json readable.
+  const round = (v) => Math.round(v * 10000) / 10000;
+  if (crop) avatars[id] = { zoom: round(crop.zoom), x: round(crop.x), y: round(crop.y) };
+  else delete avatars[id];
+  return { ...config, avatars };
+}
