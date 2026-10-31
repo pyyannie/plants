@@ -2,7 +2,7 @@ import { GitHubStore } from './github.js';
 import {
   todayLocal, formatShortDate, daysSince, entriesFor, lastFertEntry, lastNoteEntry,
   visibleFertilizers, addFertilizer, hideFertilizer, countFertilizerUses, renameFertilizer,
-  parsePlantId, addPlant, renamePlant, addEntry, plantOverview, checkLogDate, deleteEntry,
+  parsePlantId, checkPlantId, addPlant, renamePlant, addEntry, plantOverview, checkLogDate, deleteEntry,
   avatarLayout, clampCrop, setAvatarCrop, changeEntryDate, removePlant, removePlantEntries,
   recordsToCsv,
 } from './logic.js';
@@ -856,6 +856,27 @@ function renderRegister() {
 
 // --- home overview ---
 
+// Two prompts like the other quick edits: the id (goes into the NFC URL), then
+// the display name. Both are validated before anything is written.
+async function onAddPlant() {
+  const rawId = prompt('植物代号（小写英文、数字、短横线，比如 monstera-01）');
+  if (rawId === null) return;
+  let id;
+  try {
+    id = checkPlantId(rawId);
+    addPlant(state.config, id, '占位'); // fail early on a duplicate id
+  } catch (e) {
+    toast(e.message, true);
+    return;
+  }
+  const name = prompt('这盆叫什么？');
+  if (name === null) return;
+  if (await saveConfig((cfg) => addPlant(cfg, id, name), `Add plant ${id}`)) {
+    toast('✅ 已添加');
+    renderHome();
+  }
+}
+
 const MINI_AVATAR_SIZE = 52; // keep in sync with .mini-avatar in style.css
 
 // Fills in each row's small avatar once its thumbnail arrives. One folder
@@ -901,8 +922,11 @@ function renderHome() {
   mount(
     h('div', { class: 'home-head' },
       h('h1', {}, '🌱 全部植物'),
-      state.log.length > 0 &&
-        h('button', { class: 'download', onclick: downloadRecords, 'aria-label': '下载所有记录' }, '⬇️'),
+      h('span', { class: 'head-actions' },
+        h('button', { class: 'download', onclick: onAddPlant, 'aria-label': '添加植物' }, '➕'),
+        state.log.length > 0 &&
+          h('button', { class: 'download', onclick: downloadRecords, 'aria-label': '下载所有记录' }, '⬇️'),
+      ),
     ),
     rows.length
       ? h('p', { class: 'muted small' }, '按距上次施肥的天数排序，最久没施的在最上面')

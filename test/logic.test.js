@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   todayLocal, formatShortDate, daysSince, entriesFor, lastFertEntry, lastNoteEntry,
   visibleFertilizers, addFertilizer, hideFertilizer, countFertilizerUses, renameFertilizer,
-  parsePlantId, addPlant, renamePlant, addEntry, plantOverview, checkLogDate, deleteEntry,
+  parsePlantId, checkPlantId, addPlant, renamePlant, addEntry, plantOverview, checkLogDate, deleteEntry,
   avatarLayout, clampCrop, setAvatarCrop, changeEntryDate, removePlant, removePlantEntries,
   recordsToCsv,
   encodeBase64Utf8, decodeBase64Utf8, bytesToBase64, base64ToBytes,
@@ -326,4 +326,13 @@ test('recordsToCsv quotes commas, quotes and line breaks', () => {
   const log = [{ p: 'x', date: '2026-10-01', fert: 'A', note: '稀释, "1000"倍\n第二行' }];
   const row = recordsToCsv({ plants: {} }, log).split('\r\n').slice(1).join('\r\n');
   assert.equal(row, 'x,x,2026-10-01,A,"稀释, ""1000""倍\n第二行"');
+});
+
+test('checkPlantId accepts lowercase english, digits and hyphens only', () => {
+  assert.equal(checkPlantId(' monstera-01 '), 'monstera-01');
+  assert.throws(() => checkPlantId(''), /代号不能为空/);
+  assert.throws(() => checkPlantId(null), /代号不能为空/);
+  assert.throws(() => checkPlantId('Monstera'), /小写英文/);
+  assert.throws(() => checkPlantId('龟背竹'), /小写英文/);
+  assert.throws(() => checkPlantId('a b'), /小写英文/);
 });

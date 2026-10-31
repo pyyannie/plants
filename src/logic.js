@@ -113,6 +113,15 @@ export function parsePlantId(search) {
   return id && id.trim() ? id.trim() : null;
 }
 
+// The id goes into the NFC tag's URL, where iPhone drops Chinese characters,
+// so only lowercase english, digits and hyphens are allowed. Returns the trimmed id.
+export function checkPlantId(rawId) {
+  const id = (rawId ?? '').trim();
+  if (!id) throw new Error('代号不能为空');
+  if (!/^[a-z0-9-]+$/.test(id)) throw new Error('代号只能用小写英文、数字和短横线，比如 monstera-01');
+  return id;
+}
+
 export function addPlant(config, id, rawName) {
   const name = (rawName ?? '').trim();
   if (!name) throw new Error('名字不能为空');

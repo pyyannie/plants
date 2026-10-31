@@ -446,6 +446,7 @@ textarea { min-height: 72px; resize: vertical; }
 /* --- home header with download --- */
 
 .home-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.home-head .head-actions { display: flex; gap: 8px; }
 .home-head .download {
   flex: none;
   width: 48px;
