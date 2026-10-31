@@ -859,7 +859,7 @@ function renderRegister() {
 // Two prompts like the other quick edits: the id (goes into the NFC URL), then
 // the display name. Both are validated before anything is written.
 async function onAddPlant() {
-  const rawId = prompt('植物代号（小写英文、数字、短横线，比如 monstera-01）');
+  const rawId = prompt('植物代号');
   if (rawId === null) return;
   let id;
   try {
@@ -923,9 +923,9 @@ function renderHome() {
     h('div', { class: 'home-head' },
       h('h1', {}, '🌱 全部植物'),
       h('span', { class: 'head-actions' },
-        h('button', { class: 'download', onclick: onAddPlant, 'aria-label': '添加植物' }, '➕'),
+        h('button', { class: 'download icon-plus', onclick: onAddPlant, 'aria-label': '添加植物' }),
         state.log.length > 0 &&
-          h('button', { class: 'download', onclick: downloadRecords, 'aria-label': '下载所有记录' }, '⬇️'),
+          h('button', { class: 'download icon-download', onclick: downloadRecords, 'aria-label': '下载所有记录' }),
       ),
     ),
     rows.length

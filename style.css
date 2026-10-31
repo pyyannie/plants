@@ -452,5 +452,14 @@ textarea { min-height: 72px; resize: vertical; }
   width: 48px;
   padding: 0;
   border-radius: 50%;
-  font-size: 20px;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 22px;
+}
+/* White line icons drawn as SVG so the colour is not up to the emoji font. */
+.home-head .icon-plus {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E");
+}
+.home-head .icon-download {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4v11M7 11l5 5 5-5M5 20h14'/%3E%3C/svg%3E");
 }

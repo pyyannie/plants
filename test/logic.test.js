@@ -328,11 +328,10 @@ test('recordsToCsv quotes commas, quotes and line breaks', () => {
   assert.equal(row, 'x,x,2026-10-01,A,"稀释, ""1000""倍\n第二行"');
 });
 
-test('checkPlantId accepts lowercase english, digits and hyphens only', () => {
+test('checkPlantId trims and only rejects a blank id', () => {
   assert.equal(checkPlantId(' monstera-01 '), 'monstera-01');
+  assert.equal(checkPlantId('龟背竹 A'), '龟背竹 A');
   assert.throws(() => checkPlantId(''), /代号不能为空/);
+  assert.throws(() => checkPlantId('   '), /代号不能为空/);
   assert.throws(() => checkPlantId(null), /代号不能为空/);
-  assert.throws(() => checkPlantId('Monstera'), /小写英文/);
-  assert.throws(() => checkPlantId('龟背竹'), /小写英文/);
-  assert.throws(() => checkPlantId('a b'), /小写英文/);
 });
